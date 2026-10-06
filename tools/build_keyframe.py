@@ -20,8 +20,14 @@ def cutout(path, clear_trapped=True):
     if clear_trapped:
         trapped = (ff == 1).astype(np.uint8); trapped[:int(h * 0.6)] = 0
         n, lab, st, _ = cv2.connectedComponentsWithStats(trapped)
+        slits = np.zeros((h, w), np.uint8)
         for i in range(1, n):
-            if st[i, 4] > 60: holes |= lab == i
+            if st[i, 4] >= 150: holes |= lab == i                             # real gaps: show the background
+            elif st[i, 4] >= 20: slits[lab == i] = 255                         # tiny slits: fill with the dark surround
+        if slits.any():
+            slits = cv2.dilate(slits, np.ones((7, 7), np.uint8))
+            src = cv2.inpaint(np.clip(src, 0, 255).astype(np.uint8), slits, 5, cv2.INPAINT_TELEA).astype(np.float32)
+            mn = src.min(-1)
         outer = outer | holes
     alpha = np.where(outer, 0, 1).astype(np.float32)
     inner = np.clip((mn - 215) / 30, 0, 1); inner[int(h * 0.575):] = 0      # see-through mesh, not chrome
