@@ -10,17 +10,29 @@ K = int(H * 0.80) / (REF_BOTTOM - REF_TOP)
 X0 = (W - REF_W * K) / 2 - REF_LEFT * K
 Y0 = int(H * 0.92) - int(H * 0.80) - REF_TOP * K
 
-def cutout(path):
+def cutout(path, clear_trapped=True):
     src = np.array(Image.open(path).convert('RGB')).astype(np.float32)
     mn = src.min(-1); h, w = mn.shape
     ff = (mn > 238).astype(np.uint8); m = np.zeros((h + 2, w + 2), np.uint8)
     cv2.floodFill(ff, m, (0, 0), 2); outer = ff == 2
+    holes = np.zeros((h, w), bool)
+    # white background trapped inside the base (between chrome legs, lever loops)
+    if clear_trapped:
+        trapped = (ff == 1).astype(np.uint8); trapped[:int(h * 0.6)] = 0
+        n, lab, st, _ = cv2.connectedComponentsWithStats(trapped)
+        for i in range(1, n):
+            if st[i, 4] > 60: holes |= lab == i
+        outer = outer | holes
     alpha = np.where(outer, 0, 1).astype(np.float32)
     inner = np.clip((mn - 215) / 30, 0, 1); inner[int(h * 0.575):] = 0      # see-through mesh, not chrome
     alpha = np.minimum(alpha, 1 - inner * (~outer))
     alpha = cv2.erode(alpha, np.ones((3, 3), np.uint8)); alpha = cv2.GaussianBlur(alpha, (0, 0), 0.8)
     edge = (alpha > 0) & (cv2.erode((alpha > 0.8).astype(np.uint8), np.ones((5, 5), np.uint8)) == 0)
-    fix = edge & (src.mean(-1) > 150); src[fix] *= 0.35                     # remove white fringe
+    near_hole = cv2.dilate(holes.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+    fix = edge & (src.mean(-1) > 150) & ~near_hole; src[fix] *= 0.35       # remove white fringe
+    # around cleared holes the edge is bright chrome: no darkening, just a softer, tighter alpha
+    soft = cv2.GaussianBlur(cv2.erode(alpha, np.ones((3, 3), np.uint8)), (0, 0), 1.2)
+    alpha = np.where(near_hole, soft, alpha)
     return src, alpha
 
 def wheels(src, alpha):
@@ -33,12 +45,16 @@ def wheels(src, alpha):
             out.append((x + ww / 2, y + hh, ww))
     return out
 
+def rim(src, alpha):
+    # rim light: brighten the outer edge band of the chair
+    band = cv2.GaussianBlur(alpha, (0, 0), 1.5) - cv2.GaussianBlur(cv2.erode(alpha, np.ones((9, 9), np.uint8)), (0, 0), 1.5)
+    band = np.clip(band, 0, 1)[..., None]; return np.clip(src + band * 55, 0, 255)
+
 def build(path, outp):
     src, alpha = cutout(path)
     h, w = alpha.shape
-    # rim light: brighten the outer edge band of the chair
-    band = cv2.GaussianBlur(alpha, (0, 0), 1.5) - cv2.GaussianBlur(cv2.erode(alpha, np.ones((9, 9), np.uint8)), (0, 0), 1.5)
-    band = np.clip(band, 0, 1)[..., None]; src = np.clip(src + band * 55, 0, 255)
+    ps, pa = cutout(path, clear_trapped=False); wh = wheels(rim(ps, pa), pa)  # wheels from the plain cutout
+    src = rim(src, alpha)
     rgba = Image.fromarray(np.dstack([src, alpha * 255]).astype(np.uint8), 'RGBA')
     chair = rgba.resize((int(w * K), int(h * K)), Image.LANCZOS)
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -47,7 +63,7 @@ def build(path, outp):
     floor = np.clip((yy - H * 0.70) / (H * 0.30), 0, 1)                     # slightly darker floor
     base = base - floor * 14
     bg = Image.fromarray(np.stack([base, base * 0.985, base * 0.97], -1).astype(np.uint8)).convert('RGBA')
-    pts = [(X0 + x * K, Y0 + y * K, ww * K) for x, y, ww in wheels(src, alpha)]
+    pts = [(X0 + x * K, Y0 + y * K, ww * K) for x, y, ww in wh]
     Y, X = np.ogrid[0:H, 0:W]
     if pts:
         px = np.array([p[0] for p in pts]); py = np.array([p[1] for p in pts])
