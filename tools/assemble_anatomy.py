@@ -1,6 +1,7 @@
 # Assemble the 10 s anatomy edit: trim to 240 frames, match background colour, light sweep across each cut.
 import cv2, numpy as np, subprocess, sys
 D = 'anatomy_edit/'
+COOL = {'shot3_mesh_cut_v3'}                     # light line came out warm: cool it to match the other shots
 SHOTS = [  # file, frames to keep, take from end?
     ('shot1_swivel_cut', 30, False), ('shot2_headrest_cut', 29, False), ('shot3_mesh_cut_v3', 30, False),
     ('shot4_lumbar_cut', 30, False), ('shot5_side_cut', 30, False), ('shot6_armrest_cut', 30, False),
@@ -24,7 +25,7 @@ target = np.median(bgs, 0)                       # match every shot to the share
 gains = [np.clip(target / b, 0.92, 1.08) for b in bgs]
 for (name, _, _), b, g in zip(SHOTS, bgs, gains): print(name, np.round(b), 'gain', np.round(g, 3))
 
-seq = [(f, g) for c, g in zip(clips, gains) for f in c]
+seq = [(f, g, name in COOL) for c, g, (name, _, _) in zip(clips, gains, SHOTS) for f in c]
 cuts = list(np.cumsum([len(c) for c in clips])[:-1])
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
 def sweep(i):
@@ -40,8 +41,15 @@ def sweep(i):
 
 p = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', '24', '-i', '-',
                       '-c:v', 'libx264', '-crf', '16', '-pix_fmt', 'yuv420p', sys.argv[1]], stdin=subprocess.PIPE)
-for i, (f, g) in enumerate(seq):
+def cool(f):
+    # only bright pixels sitting on the dark chair (the highlight line), not the grey background
+    lum = f.mean(2); onchair = cv2.blur((lum < 60).astype(np.float32), (31, 31))
+    w = (np.clip((lum - 120) / 60, 0, 1) * np.clip((onchair - 0.6) / 0.15, 0, 1))[..., None]
+    return f * (1 + w * np.array([0.12, 0.03, -0.08]))   # BGR: more blue, less red
+
+for i, (f, g, c) in enumerate(seq):
     f = f.astype(np.float32) * g
+    if c: f = cool(f)
     b = sweep(i)
     if b is not None: f = f + (255 - f) * b[..., None]
     p.stdin.write(np.clip(f, 0, 255).astype(np.uint8).tobytes())
