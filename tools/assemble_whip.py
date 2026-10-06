@@ -28,7 +28,7 @@ def whip(f, k, sign):
     e = k ** 2
     shift, blur = sign * e * MAX_SHIFT, int(e * MAX_BLUR)
     M = np.float32([[1, 0, shift], [0, 1, 0]])
-    f = cv2.warpAffine(f, M, (W, H), borderMode=cv2.BORDER_REFLECT)
+    f = cv2.warpAffine(f, M, (W, H), borderMode=cv2.BORDER_REPLICATE)
     if blur > 2: f = cv2.blur(f, (blur, 1))
     return f
 
