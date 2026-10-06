@@ -2,9 +2,9 @@
 import cv2, numpy as np, subprocess, sys
 D = 'anatomy_edit/'
 SHOTS = [  # file, frames to keep, take from end?
-    ('shot1_swivel_cut', 33, False), ('shot2_headrest_cut', 29, False), ('shot3_mesh_cut_v3', 30, False),
+    ('shot1_swivel_cut', 30, False), ('shot2_headrest_cut', 29, False), ('shot3_mesh_cut_v3', 30, False),
     ('shot4_lumbar_cut', 30, False), ('shot5_side_cut', 30, False), ('shot6_armrest_cut', 30, False),
-    ('shot7_mechanism_cut_fallback', 27, False), ('shot8_hero_rear_cut', 31, True)]
+    ('shot7_mechanism_cut_v3', 30, False), ('shot8_hero_rear_cut', 31, True)]
 W, H, SWEEP = 1920, 1080, 8                      # sweep spans 8 frames centred on each cut
 
 def frames(name):
