@@ -9,7 +9,7 @@ while True:
     frames.append(f)
 ref = sys.argv[3] if len(sys.argv) > 3 else '0'
 def anchors(f):
-    f = f.astype(np.float32); l = f.mean(2)
+    f = f.astype(np.float64); l = f.mean(2)
     return f[l > 150].mean(0), np.median(f[l < 110], 0)
 if ref.endswith('.mp4'):
     rc = cv2.VideoCapture(ref); rc.set(cv2.CAP_PROP_POS_FRAMES, rc.get(cv2.CAP_PROP_FRAME_COUNT) - 1); tb, tc = anchors(rc.read()[1])
@@ -31,6 +31,6 @@ def encode(out, frs):
     p.stdin.close(); p.wait()
 # the BGR -> yuv420p -> BGR round trip shifts levels slightly; measure it once and pre-compensate
 encode(sys.argv[2], [frames[0]] * 3)
-bias = frames[0].astype(np.float32).mean((0, 1)) - cv2.VideoCapture(sys.argv[2]).read()[1].astype(np.float32).mean((0, 1))
+bias = frames[0].astype(np.float64).mean((0, 1)) - cv2.VideoCapture(sys.argv[2]).read()[1].astype(np.float64).mean((0, 1))
 encode(sys.argv[2], (np.clip(np.rint(f.astype(np.float32) * a + b + bias), 0, 255).astype(np.uint8) for f, a, b in zip(frames, A, B)))
 print('gain first/last', A[0].round(3), A[-1].round(3), 'offset last', B[-1].round(1))
