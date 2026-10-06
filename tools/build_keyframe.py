@@ -59,11 +59,11 @@ def rim(src, alpha):
 # wheels the detector misses (small, far-side wheels merged with the base): cutout name -> (cx, bottom, width)
 EXTRA_WHEELS = {'photo18_cutout_white.jpg': [(489, 1383, 58), (793, 1412, 57)]}
 
-def build(path, outp):
+def build(path, outp, use_rim=True):
     src, alpha = cutout(path)
     h, w = alpha.shape
     ps, pa = cutout(path, clear_trapped=False); wh = wheels(rim(ps, pa), pa) + EXTRA_WHEELS.get(os.path.basename(path), [])  # wheels from the plain cutout
-    src = rim(src, alpha)
+    if use_rim: src = rim(src, alpha)                                       # Kling turns this into a halo: build with 'norim'
     rgba = Image.fromarray(np.dstack([src, alpha * 255]).astype(np.uint8), 'RGBA')
     chair = rgba.resize((int(w * K), int(h * K)), Image.LANCZOS)
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -90,4 +90,4 @@ def build(path, outp):
     print(outp, 'wheels found:', len(pts))
 
 if __name__ == '__main__':
-    build(sys.argv[1], sys.argv[2])
+    build(sys.argv[1], sys.argv[2], use_rim='norim' not in sys.argv[3:])
