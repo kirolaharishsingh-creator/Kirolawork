@@ -1,7 +1,7 @@
 """Place a white-background chair cutout into a 4K light-grey studio.
 Usage: python3 tools/build_keyframe.py <cutout.jpg> <out.jpg>
 All frames use the same placement so start/end frames line up."""
-import sys, numpy as np, cv2
+import os, sys, numpy as np, cv2
 from PIL import Image, ImageFilter
 
 W, H = 3840, 2160
@@ -18,7 +18,7 @@ def cutout(path, clear_trapped=True):
     holes = np.zeros((h, w), bool)
     # white background trapped inside the base (between chrome legs, lever loops)
     if clear_trapped:
-        trapped = (ff == 1).astype(np.uint8); trapped[:int(h * 0.6)] = 0
+        trapped = (ff == 1).astype(np.uint8); trapped[:int(h * 0.55)] = 0
         n, lab, st, _ = cv2.connectedComponentsWithStats(trapped)
         slits = np.zeros((h, w), np.uint8)
         for i in range(1, n):
@@ -56,10 +56,13 @@ def rim(src, alpha):
     band = cv2.GaussianBlur(alpha, (0, 0), 1.5) - cv2.GaussianBlur(cv2.erode(alpha, np.ones((9, 9), np.uint8)), (0, 0), 1.5)
     band = np.clip(band, 0, 1)[..., None]; return np.clip(src + band * 55, 0, 255)
 
+# wheels the detector misses (small, far-side wheels merged with the base): cutout name -> (cx, bottom, width)
+EXTRA_WHEELS = {'photo18_cutout_white.jpg': [(489, 1383, 58), (793, 1412, 57)]}
+
 def build(path, outp):
     src, alpha = cutout(path)
     h, w = alpha.shape
-    ps, pa = cutout(path, clear_trapped=False); wh = wheels(rim(ps, pa), pa)  # wheels from the plain cutout
+    ps, pa = cutout(path, clear_trapped=False); wh = wheels(rim(ps, pa), pa) + EXTRA_WHEELS.get(os.path.basename(path), [])  # wheels from the plain cutout
     src = rim(src, alpha)
     rgba = Image.fromarray(np.dstack([src, alpha * 255]).astype(np.uint8), 'RGBA')
     chair = rgba.resize((int(w * K), int(h * K)), Image.LANCZOS)
