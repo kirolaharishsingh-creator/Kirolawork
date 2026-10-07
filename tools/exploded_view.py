@@ -47,6 +47,10 @@ for k in range(1, len(names) + 1):
     d = cv2.distanceTransform((seed != k).astype(np.uint8), cv2.DIST_L2, 5)
     m = d < best; best[m] = d[m]; lab[m] = k
 lab[~chair] = 0
+# the dark band above the white gap between seat and lumbar is the lumbar frame's lower edge, not the seat
+yy0, xx0 = np.mgrid[0:h, 0:w]
+seat_i, lumbar_i = names.index('seat') + 1, names.index('lumbar') + 1
+lab[(lab == seat_i) & (xx0 < 722) & (yy0 < 1010 + (xx0 - 560) * 0.354)] = lumbar_i
 
 wheel_offsets = []
 for (x, y), r in WHEELS:                                  # wheels drop with the base and spread outward
@@ -91,7 +95,7 @@ def explode(t):                                           # 0..1 overall explosi
 def frame(t):
     f = explode(t)
     if all(f(st) == 0 for _, _, st in specs): return np.clip(REAL, 0, 255).astype(np.uint8)   # assembled: the real photo
-    sh = cv2.warpAffine(SHADOW, np.float32([[1, 0, 0], [0, 1, f(0.40) * 260 * sy]]), (W, H), borderValue=(1, 1, 1))
+    sh = cv2.warpAffine(SHADOW, np.float32([[1, 0, 0], [0, 1, f(0.45) * 330 * sy]]), (W, H), borderValue=(1, 1, 1))
     out = BG * sh
     for idx in order:
         L = layers[idx]
