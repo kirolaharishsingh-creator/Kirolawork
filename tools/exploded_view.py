@@ -3,6 +3,7 @@
 # along its own direction, holds, and slides back. First and last frames are the untouched real chair.
 # Usage: python3 tools/exploded_view.py out.mp4 [debug_parts.png] [--3d]
 # --3d: depth parallax, small perspective turn per part, floor shadows under floating parts, motion blur
+# --glow: cool-white glow + light streaks around each part as it detaches and as it locks back in
 import sys, subprocess, numpy as np, cv2
 sys.path.insert(0, 'tools')
 import build_keyframe as bk
@@ -32,6 +33,8 @@ WHEELS = [((300,1640),45), ((830,1640),45), ((70,1810),58), ((1050,1810),58), ((
 
 plain4k, shadow4k, chair4k, (px4, py4) = bk.build(SRC, None, use_rim=False, scale=0.62)
 THREE_D = '--3d' in sys.argv
+GLOW = '--glow' in sys.argv
+GLOW_COL = np.array([255, 248, 238], np.float32)    # BGR: cool white, never yellow
 DEPTH = {'frame': -0.6, 'backrest': -0.4, 'headrest': -0.3, 'lumbar': -0.5, 'far_armrest': -0.9, 'base': 0.1,
          'gas_lift': 0.0, 'mechanism': 0.15, 'seat': 0.35, 'near_armrest': 0.9,
          'wheel0': -0.5, 'wheel1': -0.6, 'wheel2': 0.4, 'wheel3': 0.3, 'wheel4': 0.9}
@@ -144,6 +147,7 @@ def render(t):
             cv2.ellipse(fs, (int(cx_), int(FLOOR + 6)), (int(rw), int(10 + rw * 0.08)), 0, 0, 360, float(op), -1)
         fs = cv2.GaussianBlur(fs, (0, 0), 18)
         out = out * (1 - fs[..., None])
+    G = np.zeros((H, W), np.float32) if GLOW else None
     for idx in order:
         L = layers[idx]
         if L is None: continue
@@ -152,6 +156,20 @@ def render(t):
         c = cv2.warpPerspective(col, M, (W, H), flags=cv2.INTER_LINEAR)
         aa = cv2.warpPerspective(a, M, (W, H), flags=cv2.INTER_LINEAR)[..., None]
         out = out * (1 - aa) + c * aa
+        if GLOW and k > 0:
+            g = 4 * k * (1 - k) + 0.22 * k                   # flares while breaking away / locking in, soft rim at hold
+            m = aa[..., 0]
+            rim = np.clip(m - cv2.erode(m, np.ones((3, 3), np.uint8)), 0, 1)
+            outer = np.clip(cv2.GaussianBlur(m, (0, 0), 9) - m, 0, 1)
+            # light streaks trail along the part's direction of travel
+            ang = np.degrees(np.arctan2(dy, dx)); ln = int(31 + 70 * g)
+            ker = np.zeros((ln, ln), np.float32); ker[ln // 2, :] = 1
+            ker = cv2.warpAffine(ker, cv2.getRotationMatrix2D((ln / 2, ln / 2), -ang, 1), (ln, ln)); ker /= max(ker.sum(), 1e-6)
+            streak = cv2.filter2D(outer + rim, -1, ker)
+            G = np.maximum(G, g * (0.9 * rim + 1.6 * outer + 0.8 * streak))
+    if GLOW:
+        G = np.clip(G + 0.5 * cv2.GaussianBlur(G, (0, 0), 25), 0, 1)[..., None]   # bloom
+        out = out + (GLOW_COL - out) * G                     # screen-like: lifts toward cool white
     return out
 
 def frame(t):
