@@ -78,6 +78,7 @@ def build(path, outp, use_rim=True, scale=1.0):
     floor = np.clip((yy - H * 0.70) / (H * 0.30), 0, 1)                     # slightly darker floor
     base = base - floor * 14
     bg = Image.fromarray(np.stack([base, base * 0.985, base * 0.97], -1).astype(np.uint8)).convert('RGBA')
+    plain = bg.convert('RGB')
     pts = [(X0 + x * K, Y0 + y * K, ww * K) for x, y, ww in wh]
     Y, X = np.ogrid[0:H, 0:W]
     if pts:
@@ -91,6 +92,10 @@ def build(path, outp, use_rim=True, scale=1.0):
             e = ((X - x) / (ww * 0.75)) ** 2 + ((Y - (y - 4)) / (ww * 0.16)) ** 2
             cs += np.where(e < 1, (1 - e) * 190, 0)
         bg.alpha_composite(Image.fromarray(np.dstack([np.zeros((H, W, 3), np.uint8), np.clip(cs, 0, 230).astype(np.uint8)])).filter(ImageFilter.GaussianBlur(7)))
+    if outp is None:                                                       # caller wants the pieces, not a file
+        out = (plain, bg.convert('RGB'), chair, (int(X0), int(Y0)))
+        K, X0, Y0 = K0, X00, Y00
+        return out
     bg.alpha_composite(chair, (int(X0), int(Y0)))
     bg.convert('RGB').save(outp, quality=94)
     print(outp, 'wheels found:', len(pts))
