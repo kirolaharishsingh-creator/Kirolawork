@@ -122,13 +122,14 @@ def place(idx, k, t):
     T = np.array([[1, 0, par], [0, 1, 0], [0, 0, 1]])
     return T @ A @ S @ P
 
-FLOOR = oy + 1640 * sy                                     # floor line under the wheels at rest
+FLOOR0 = oy + 1640 * sy                                    # floor line under the wheels at rest
 def render(t):
     f = explode(t)
     if all(f(st) == 0 for _, _, st in specs): return REAL.copy()
     sh = cv2.warpAffine(SHADOW, np.float32([[1, 0, 0], [0, 1, f(0.45) * 330 * sy]]), (W, H), borderValue=(1, 1, 1))
     out = BG * sh
     if THREE_D:                                            # soft floor shadow under each floating part
+        FLOOR = FLOOR0 + f(0.45) * 330 * sy                # the floor sits under the lowered wheels
         fs = np.zeros((H, W), np.float32)
         for idx in order:
             L = layers[idx]
