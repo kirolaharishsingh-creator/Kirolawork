@@ -1,5 +1,5 @@
 """Place a white-background chair cutout into a 4K light-grey studio.
-Usage: python3 tools/build_keyframe.py <cutout.jpg> <out.jpg>
+Usage: python3 tools/build_keyframe.py <cutout.jpg> <out.jpg> [norim] [scale=0.7]
 All frames use the same placement so start/end frames line up."""
 import os, sys, numpy as np, cv2
 from PIL import Image, ImageFilter
@@ -59,12 +59,18 @@ def rim(src, alpha):
 # wheels the detector misses (small, far-side wheels merged with the base): cutout name -> (cx, bottom, width)
 EXTRA_WHEELS = {'photo18_cutout_white.jpg': [(489, 1383, 58), (793, 1412, 57)]}
 
-def build(path, outp, use_rim=True):
+def build(path, outp, use_rim=True, scale=1.0):
+    # scale < 1 shrinks the chair about its own centre (room around it, e.g. for an exploded view)
+    global K, X0, Y0
+    K0, X00, Y00 = K, X0, Y0
     src, alpha = cutout(path)
     h, w = alpha.shape
     ps, pa = cutout(path, clear_trapped=False); wh = wheels(rim(ps, pa), pa) + EXTRA_WHEELS.get(os.path.basename(path), [])  # wheels from the plain cutout
     if use_rim: src = rim(src, alpha)                                       # Kling turns this into a halo: build with 'norim'
     rgba = Image.fromarray(np.dstack([src, alpha * 255]).astype(np.uint8), 'RGBA')
+    if scale != 1.0:
+        cx, cy = X0 + w * K / 2, Y0 + h * K / 2
+        K = K0 * scale; X0, Y0 = cx - w * K / 2, cy - h * K / 2
     chair = rgba.resize((int(w * K), int(h * K)), Image.LANCZOS)
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
     d = np.sqrt(((xx - W / 2) / (W * 0.55)) ** 2 + ((yy - H * 0.42) / (H * 0.75)) ** 2)
@@ -88,6 +94,8 @@ def build(path, outp, use_rim=True):
     bg.alpha_composite(chair, (int(X0), int(Y0)))
     bg.convert('RGB').save(outp, quality=94)
     print(outp, 'wheels found:', len(pts))
+    K, X0, Y0 = K0, X00, Y00
 
 if __name__ == '__main__':
-    build(sys.argv[1], sys.argv[2], use_rim='norim' not in sys.argv[3:])
+    sc = [float(a.split('=')[1]) for a in sys.argv[3:] if a.startswith('scale=')]
+    build(sys.argv[1], sys.argv[2], use_rim='norim' not in sys.argv[3:], scale=sc[0] if sc else 1.0)
