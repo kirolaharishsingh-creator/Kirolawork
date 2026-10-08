@@ -59,10 +59,27 @@ cap_mat = bpy.data.materials.new('cap'); cap_mat.use_nodes = True
 cp = cap_mat.node_tree.nodes['Principled BSDF']; cp.inputs['Base Color'].default_value = (0.012, 0.012, 0.013, 1)
 cp.inputs['Roughness'].default_value = 1.0; cp.inputs['Specular IOR Level'].default_value = 0.0   # no sheen: caps read as dark openings
 
-def cap_holes(m):
-    # weld the AI model's texture seams, then close every opening left by the cut with a matte black cap
+def cap_holes(m, min_faces=int(os.environ.get('MINF', 800))):
+    # weld the AI model's texture seams, drop small loose shards, then close every cut opening with a matte black cap
     bm = bmesh.new(); bm.from_mesh(m)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=2e-4)
+    bm.to_mesh(m); bm.free()
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    nf_ = len(m.polygons); lt_ = np.zeros(nf_, int); m.polygons.foreach_get('loop_total', lt_)
+    ls_ = np.zeros(nf_, int); m.polygons.foreach_get('loop_start', ls_)
+    lv_ = np.zeros(len(m.loops), int); m.loops.foreach_get('vertex_index', lv_)
+    fi = np.repeat(np.arange(nf_), lt_); nv_ = len(m.vertices)
+    # faces sharing a vertex are connected: bipartite face-vertex graph
+    G = coo_matrix((np.ones(len(lv_)), (fi, nf_ + lv_)), shape=(nf_ + nv_, nf_ + nv_))
+    _, comp = connected_components(G, directed=False)
+    fc = comp[:nf_]; size = np.bincount(fc)
+    drop = np.nonzero(size[fc] < min_faces)[0]
+    bm = bmesh.new(); bm.from_mesh(m); bm.faces.ensure_lookup_table()
+    if len(drop):
+        bmesh.ops.delete(bm, geom=[bm.faces[i] for i in drop], context='FACES')
+        loose = [v for v in bm.verts if not v.link_faces]
+        if loose: bmesh.ops.delete(bm, geom=loose, context='VERTS')
     edges = [e for e in bm.edges if e.is_boundary]
     new = bmesh.ops.holes_fill(bm, edges=edges, sides=0)['faces']
     if new:
@@ -70,6 +87,7 @@ def cap_holes(m):
         for f in tri_: f.material_index = 1; f.smooth = False
         bmesh.ops.recalc_face_normals(bm, faces=tri_)
     bm.to_mesh(m); bm.free(); m.update()
+    print('cleaned', m.name, 'dropped faces', len(drop), flush=True)
     return len(new)
 
 objs = {}
@@ -187,9 +205,9 @@ camo = bpy.data.objects.new('cam', cam); sc.collection.objects.link(camo); sc.ca
 
 def camera_at(t):
     az = math.radians(228 + 22 * math.sin(math.pi * t / 4.8))   # orbit out and back: last frame = first frame
-    e = smooth((t - T0) / 1.7) * (1 - smooth((t - HOLD_END) / 1.7))   # pull back gently while the parts are apart
+    e = smooth((t - T0) / 0.8) * (1 - smooth((t - (HOLD_END + 7 * STEP)) / 0.8))   # pull back as the parts leave, in as they return
     dist = 3.0 + 1.1 * e; el = math.radians(10)
-    target = mathutils.Vector((-0.08 - 0.08 * e, 0.0, 0.0))
+    target = mathutils.Vector((-0.08 - 0.08 * e, 0.0, 0.06 * e))   # aim a little higher while the headrest is up
     pos = target + dist * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
     camo.location = pos; camo.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
 
@@ -201,7 +219,7 @@ def pose(t):
     camera_at(t)
 
 import os
-frames = [0, 60] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
+frames = [20, 60, 92] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
     sc.render.filepath = f'/home/user/frames/{f:04d}.png'; sc.render.image_settings.file_format = 'PNG'

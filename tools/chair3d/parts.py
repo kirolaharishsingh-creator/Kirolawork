@@ -79,6 +79,8 @@ def vertex_parts(co, lab, tri=None):
     # per-vertex part ids; the headrest lock (the slider tongue in the V notch at the top of the backrest)
     # is cut out by shape rather than by shell, so it leaves with the headrest without tearing the fabric
     vp = label_components(co, lab, tri)[lab]
+    import os
+    if os.environ.get('LOCKCUT', '0') != '1': return vp      # default: the lock stays with the backrest (cutting it left shards)
     x, y, z = co[:, 0], co[:, 1], co[:, 2]
     w = 0.012 + 0.016 * np.clip((z - 0.285) / 0.09, 0, 1)        # V: narrow at the bottom, wider at the top
     lock = (np.abs(y) < w) & (z > 0.285) & (z < 0.375) & (x > -0.2)
