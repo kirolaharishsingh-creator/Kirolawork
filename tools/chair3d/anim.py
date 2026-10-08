@@ -83,7 +83,7 @@ chrome = chrome_src; chrome.name = 'chrome'
 bsdf = [n for n in chrome.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'][0]
 for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].links) + list(bsdf.inputs['Base Color'].links):
     chrome.node_tree.links.remove(l)
-bsdf.inputs['Base Color'].default_value = (0.9, 0.9, 0.92, 1)
+bsdf.inputs['Base Color'].default_value = (0.8, 0.8, 0.82, 1)
 bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.08
 for n in ('base', 'gas_lift'):
     objs[n].data.materials[0] = chrome
@@ -109,8 +109,8 @@ bg = world.node_tree.nodes['Background']; bg.inputs[1].default_value = 0.45
 wn, wl = world.node_tree.nodes, world.node_tree.links
 tc = wn.new('ShaderNodeTexCoord'); sep = wn.new('ShaderNodeSeparateXYZ'); ramp = wn.new('ShaderNodeValToRGB')
 wl.new(tc.outputs['Generated'], sep.inputs[0]); wl.new(sep.outputs['Z'], ramp.inputs['Fac'])
-ramp.color_ramp.elements[0].position = 0.45; ramp.color_ramp.elements[0].color = (0.04, 0.04, 0.045, 1)
-ramp.color_ramp.elements[1].position = 0.62; ramp.color_ramp.elements[1].color = (0.95, 0.95, 0.97, 1)
+ramp.color_ramp.elements[0].position = 0.30; ramp.color_ramp.elements[0].color = (0.04, 0.04, 0.045, 1)
+ramp.color_ramp.elements[1].position = 0.75; ramp.color_ramp.elements[1].color = (0.95, 0.95, 0.97, 1)
 wl.new(ramp.outputs['Color'], bg.inputs[0])
 
 def area(name, loc, energy, size):
