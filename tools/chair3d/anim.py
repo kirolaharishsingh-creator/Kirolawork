@@ -48,18 +48,23 @@ me = src.data
 nf = len(me.polygons); lst = np.zeros(nf, int); me.polygons.foreach_get('loop_start', lst)
 lv = np.zeros(len(me.loops), int); me.loops.foreach_get('vertex_index', lv)
 fpart = vpart[lv[lst]]
-for _ in range(len(PART_NAMES) - 1): me.materials.append(mat)
-me.polygons.foreach_set('material_index', fpart.astype(np.int32)); me.update()
-bpy.context.view_layer.objects.active = src; src.select_set(True)
-bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
-bpy.ops.mesh.separate(type='MATERIAL'); bpy.ops.object.mode_set(mode='OBJECT')
+lt = np.zeros(nf, int); me.polygons.foreach_get('loop_total', lt)
+assert (lt == 3).all(), 'expects a triangle mesh'
+li = lst[:, None] + np.arange(3)                    # loop indices of each triangle
+tri = lv[li]
+uv = np.zeros(len(me.loops) * 2, np.float32); me.uv_layers[0].data.foreach_get('uv', uv); uv = uv.reshape(-1, 2)[li]
 objs = {}
-for o in bpy.context.scene.objects:
-    if o.type != 'MESH': continue
-    idx = [p.material_index for p in o.data.polygons[:1]][0]
-    objs[PART_NAMES[idx]] = o; o.name = PART_NAMES[idx]
-    bpy.context.view_layer.objects.active = o
-    bpy.ops.object.material_slot_remove_unused()
+for p, name in enumerate(PART_NAMES):
+    sel = np.nonzero(fpart == p)[0]
+    t = tri[sel]; used, inv = np.unique(t, return_inverse=True)
+    m2 = bpy.data.meshes.new(name)
+    m2.vertices.add(len(used)); m2.vertices.foreach_set('co', co[used].reshape(-1))       # world coordinates; objects keep identity transforms
+    m2.loops.add(len(sel) * 3); m2.loops.foreach_set('vertex_index', inv.reshape(-1).astype(np.int32))
+    m2.polygons.add(len(sel)); m2.polygons.foreach_set('loop_start', (np.arange(len(sel)) * 3).astype(np.int32))
+    m2.uv_layers.new(); m2.uv_layers[0].data.foreach_set('uv', uv[sel].reshape(-1))
+    m2.update(); m2.shade_smooth(); m2.materials.append(mat)
+    o = bpy.data.objects.new(name, m2); bpy.context.scene.collection.objects.link(o); objs[name] = o
+bpy.data.objects.remove(src)
 print('parts', sorted(objs), flush=True)
 
 # polished chrome for the base and gas lift (keeps the texture's dark details)
