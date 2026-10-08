@@ -3,6 +3,7 @@
 # along its own direction, holds, and slides back. First and last frames are the untouched real chair.
 # Usage: python3 tools/exploded_view.py out.mp4 [debug_parts.png] [--3d]
 # --3d: depth parallax, small perspective turn per part, floor shadows under floating parts, motion blur
+# --spread: wider layout on the right side; --still=out.png writes only the exploded hold frame
 # --glow: cool-white glow + light streaks around each part as it detaches and as it locks back in
 import sys, subprocess, numpy as np, cv2
 sys.path.insert(0, 'tools')
@@ -29,6 +30,10 @@ PARTS = [
  ('seat',         [(130,1100),(170,1060),(400,1030),(560,1025),(700,1042),(800,1075),(890,1102),(950,1100),(950,1290),(800,1352),(500,1347),(300,1308),(160,1258),(130,1200)], (-60, -50), 0.20),
  ('near_armrest', [(85,830),(110,800),(250,782),(390,795),(392,825),(345,845),(380,1000),(395,1040),(330,1045),(290,935),(230,895),(100,865)], (-190, -40), 0.25),
 ]
+# --spread: wider layout so the spine frame, lumbar and far armrest no longer bunch up on the right
+SPREAD = {'frame': (330, -70), 'lumbar': (170, 40), 'far_armrest': (420, 190)}
+if '--spread' in sys.argv:
+    PARTS = [(n, poly, SPREAD.get(n, off), st) for n, poly, off, st in PARTS]
 WHEELS = [((300,1640),45), ((830,1640),45), ((70,1810),58), ((1050,1810),58), ((560,1930),58)]   # display coords, radius
 
 plain4k, shadow4k, chair4k, (px4, py4) = bk.build(SRC, None, use_rim=False, scale=0.62)
@@ -182,6 +187,9 @@ def frame(t):
 if len(sys.argv) > 2 and not sys.argv[2].startswith('--'):                                     # colour-coded part map for checking the split
     pal = np.random.RandomState(3).randint(40, 255, (len(names) + 1, 3)); pal[0] = 255
     cv2.imwrite(sys.argv[2], pal[lab].astype(np.uint8))
+STILL = next((a[8:] for a in sys.argv if a.startswith('--still=')), None)
+if STILL:                                                  # just the fully exploded hold frame, for checking or as a keyframe
+    cv2.imwrite(STILL, frame(5.0)); sys.exit()
 p = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(FPS), '-i', '-',
                       '-vf', 'scale=flags=accurate_rnd+full_chroma_int:out_color_matrix=bt601:out_range=tv',
                       '-c:v', 'libx264', '-crf', '16', '-pix_fmt', 'yuv420p', sys.argv[1]], stdin=subprocess.PIPE)
