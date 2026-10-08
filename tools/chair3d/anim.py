@@ -82,7 +82,7 @@ for p, name in enumerate(PART_NAMES):
     m2.polygons.add(len(sel)); m2.polygons.foreach_set('loop_start', (np.arange(len(sel)) * 3).astype(np.int32))
     m2.uv_layers.new(); m2.uv_layers[0].data.foreach_set('uv', uv[sel].reshape(-1))
     m2.update(); m2.shade_smooth(); m2.materials.append(mat); m2.materials.append(cap_mat)
-    cap_holes(m2)
+    if os.environ.get('CAPS', '0') == '1': cap_holes(m2)
     o = bpy.data.objects.new(name, m2); bpy.context.scene.collection.objects.link(o); objs[name] = o
 bpy.data.objects.remove(src)
 print('parts', sorted(objs), flush=True)
@@ -119,6 +119,17 @@ bsdf.inputs['Base Color'].default_value = (0.62, 0.62, 0.65, 1)
 bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.14
 for n in ('base', 'gas_lift'):
     objs[n].data.materials[0] = chrome
+
+def black_backfaces(m):
+    # the inside of a cut opening shows the model's back faces: make them flat black so openings read as dark recesses
+    nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
+    surf = out.inputs['Surface'].links[0].from_socket
+    geo = nt.nodes.new('ShaderNodeNewGeometry'); dark = nt.nodes.new('ShaderNodeBsdfDiffuse')
+    dark.inputs['Color'].default_value = (0.004, 0.004, 0.004, 1)
+    mix = nt.nodes.new('ShaderNodeMixShader')
+    nt.links.new(geo.outputs['Backfacing'], mix.inputs[0]); nt.links.new(surf, mix.inputs[1]); nt.links.new(dark.outputs[0], mix.inputs[2])
+    nt.links.new(mix.outputs[0], out.inputs['Surface'])
+for m in (mat, chrome): black_backfaces(m)
 
 def add_glow(m):
     nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
