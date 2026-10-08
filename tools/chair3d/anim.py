@@ -156,7 +156,7 @@ if os.environ.get('PLANES', '1') == '1':
     plane_split('mechanism', 'gas_lift', -0.255, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045)
     # the column only: the hub socket and arm roots stay with the base
     # the chrome rod only: its wider housing stays with the base hub
-    plane_split('gas_lift', 'base', -0.30, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045, outside_to_b=True)
+    plane_split('gas_lift', 'base', -0.33, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045, outside_to_b=True)
     # armrests end in a clean cut where their bracket meets the seat
     plane_split('arm_r', 'seat', -0.16, lambda x, y: y > 0.21)       # outside the cushion's edge only
     plane_split('arm_l', 'seat', -0.16, lambda x, y: y < -0.21)
@@ -198,7 +198,7 @@ for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].lin
     chrome.node_tree.links.remove(l)
 bsdf.inputs['Base Color'].default_value = (0.85, 0.85, 0.88, 1)
 bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.18
-for n in ('base', 'gas_lift'):
+for n in ('base',):
     objs[n].data.materials[0] = chrome
 
 def fabric_material(src_mat):
