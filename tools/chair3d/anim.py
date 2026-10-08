@@ -229,6 +229,54 @@ def black_backfaces(m):
 for m in (mat, chrome): black_backfaces(m)
 fabric = fabric_material(mat); objs['backrest'].data.materials[0] = fabric
 
+def treat_black(m):
+    # same treatment as the chair's own material: real black, no metal, soft sheen, capped brightness
+    nt = m.node_tree; pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
+    if pb.inputs['Base Color'].links:
+        src = pb.inputs['Base Color'].links[0].from_socket
+        g = nt.nodes.new('ShaderNodeGamma'); g.inputs[1].default_value = 2.2; nt.links.new(src, g.inputs[0])
+        sep = nt.nodes.new('ShaderNodeSeparateColor'); cmb = nt.nodes.new('ShaderNodeCombineColor'); nt.links.new(g.outputs[0], sep.inputs[0])
+        for ch in range(3):
+            mn = nt.nodes.new('ShaderNodeMath'); mn.operation = 'MINIMUM'; mn.inputs[1].default_value = 0.06
+            nt.links.new(sep.outputs[ch], mn.inputs[0]); nt.links.new(mn.outputs[0], cmb.inputs[ch])
+        nt.links.new(cmb.outputs[0], pb.inputs['Base Color'])
+    for l in list(pb.inputs['Metallic'].links): nt.links.remove(l)
+    pb.inputs['Metallic'].default_value = 0.0; pb.inputs['Specular IOR Level'].default_value = 0.25
+    if pb.inputs['Roughness'].links:
+        rl = pb.inputs['Roughness'].links[0].from_socket
+        rm = nt.nodes.new('ShaderNodeMath'); rm.operation = 'MAXIMUM'; rm.inputs[1].default_value = 0.6
+        nt.links.new(rl, rm.inputs[0]); nt.links.new(rm.outputs[0], pb.inputs['Roughness'])
+
+NEWBACK = os.environ.get('NEWBACK')
+if NEWBACK:
+    # swap in the backrest rebuilt from the real photos, fitted to where the old one sat
+    from scipy.spatial import cKDTree
+    old = objs['backrest']; ov = np.zeros(len(old.data.vertices) * 3); old.data.vertices.foreach_get('co', ov); ov = ov.reshape(-1, 3)
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=NEWBACK)
+    nb = [o for o in bpy.data.objects if o not in before and o.type == 'MESH'][0]
+    nm = nb.data; nm.transform(nb.matrix_world); nb.matrix_world = mathutils.Matrix.Identity(4)
+    nv = np.zeros(len(nm.vertices) * 3); nm.vertices.foreach_get('co', nv); nv = nv.reshape(-1, 3)
+    ext = nv.max(0) - nv.min(0); print('new backrest extents xyz', ext.round(3), flush=True)
+    thin = int(np.argmin(ext)); horiz = [i for i in (0, 1) if i != thin][0] if thin != 2 else 1
+    # local frame of the new panel: u = across, w = up, t = thickness (sign: +t is the panel's front)
+    u, w, t = nv[:, horiz], nv[:, 2], nv[:, thin]
+    if os.environ.get('NEWBACK_FLIPT') == '1': t = -t
+    if os.environ.get('NEWBACK_FLIPU') == '1': u = -u
+    # target: old backrest across = y, up = z; front faces +x
+    oy0, oy1 = np.percentile(ov[:, 1], [0.5, 99.5]); oz0, oz1 = np.percentile(ov[:, 2], [0.5, 99.5])
+    su = (oy1 - oy0) / (u.max() - u.min()); sw = (oz1 - oz0) / (w.max() - w.min()); s = (su + sw) / 2
+    Y = oy0 + (u - u.min()) * su; Z = oz0 + (w - w.min()) * sw
+    # bend the flat panel onto the old backrest's curved mid-surface (its side profile)
+    tree = cKDTree(ov[:, 1:3]); _, idx = tree.query(np.c_[Y, Z], k=24)
+    mid = np.median(ov[idx, 0], axis=1)
+    X = mid + (t - (t.max() + t.min()) / 2) * s
+    nm.vertices.foreach_set('co', np.c_[X, Y, Z].reshape(-1)); nm.update()
+    for p in nm.polygons: p.use_smooth = True
+    for m in nm.materials: treat_black(m); black_backfaces(m)
+    bpy.data.objects.remove(old); nb.name = 'backrest'; objs['backrest'] = nb
+    print('new backrest fitted, scale', round(s, 4), flush=True)
+
 def add_glow(m):
     nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
     surf = out.inputs['Surface'].links[0].from_socket
@@ -243,7 +291,7 @@ def add_glow(m):
     L.new(lw.outputs['Facing'], pw.inputs[0]); L.new(pw.outputs[0], mu.inputs[0]); L.new(at.outputs['Fac'], mu.inputs[1])
     L.new(mu.outputs[0], mu2.inputs[0]); L.new(mu2.outputs[0], em.inputs['Strength'])
     L.new(surf, add.inputs[0]); L.new(em.outputs[0], add.inputs[1]); L.new(add.outputs[0], out.inputs['Surface'])
-for m in (mat, chrome, cap_mat, fabric): add_glow(m)
+for m in {mat, chrome, cap_mat, fabric, *objs['backrest'].data.materials}: add_glow(m)
 
 # wheel offsets: straight down plus outward from the hub
 hub = np.array([0.01, 0.0])
