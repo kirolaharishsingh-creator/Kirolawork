@@ -247,6 +247,50 @@ def treat_black(m):
         rm = nt.nodes.new('ShaderNodeMath'); rm.operation = 'MAXIMUM'; rm.inputs[1].default_value = 0.6
         nt.links.new(rl, rm.inputs[0]); nt.links.new(rm.outputs[0], pb.inputs['Roughness'])
 
+PROJBACK = os.environ.get('PROJBACK')       # 'front.png,back.png': isolated real backrest photos
+if PROJBACK:
+    # keep the original backrest shape (it fits the chair), flatten the V dents in its mesh area,
+    # and wrap the real fabric from the isolated photos onto it: front photo on the front, back photo on the back
+    ob = objs['backrest']; me = ob.data
+    bm = bmesh.new(); bm.from_mesh(me)
+    inner = [v for v in bm.verts if abs(v.co.y) < 0.135 and 0.125 < v.co.z < 0.355]
+    for _ in range(int(os.environ.get('SMOOTH', 40))):
+        bmesh.ops.smooth_vert(bm, verts=inner, factor=0.5, use_axis_x=True, use_axis_y=False, use_axis_z=False)
+    bm.to_mesh(me); bm.free(); me.update()
+    v = np.zeros(len(me.vertices) * 3); me.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
+    y0, y1 = np.percentile(v[:, 1], [0.5, 99.5]); z0, z1 = np.percentile(v[:, 2], [0.5, 99.5])
+    def panel_box(img):
+        w, h = img.size; px = np.array(img.pixels[:], np.float32).reshape(h, w, 4)
+        m = px[..., :3].mean(-1) < 0.6; ys, xs = np.nonzero(m)
+        return xs.min() / w, xs.max() / w, ys.min() / h, ys.max() / h      # pixel rows run bottom to top in Blender
+    imgs = [bpy.data.images.load(os.path.abspath(p)) for p in PROJBACK.split(',')]
+    boxes = [panel_box(im) for im in imgs]
+    lv = np.zeros(len(me.loops), np.int32); me.loops.foreach_get('vertex_index', lv)
+    P = v[lv]; s = (P[:, 1] - y0) / (y1 - y0); t = (P[:, 2] - z0) / (z1 - z0)
+    for name, (u0, u1, w0, w1), mirror in (('front_uv', boxes[0], False), ('back_uv', boxes[1], True)):
+        lay = me.uv_layers.new(name=name)
+        su = (1 - s) if mirror else s          # seen from behind, left and right swap
+        # front view: chair's +y appears on the right of the photo
+        uv = np.c_[u0 + su * (u1 - u0), w0 + t * (w1 - w0)]
+        lay.data.foreach_set('uv', uv.astype(np.float32).reshape(-1))
+    pm = bpy.data.materials.new('backrest_photo'); pm.use_nodes = True; nt = pm.node_tree
+    pb = nt.nodes['Principled BSDF']; pb.inputs['Roughness'].default_value = 0.7; pb.inputs['Specular IOR Level'].default_value = 0.25
+    texs = []
+    for im, uvname in zip(imgs, ('front_uv', 'back_uv')):
+        tx = nt.nodes.new('ShaderNodeTexImage'); tx.image = im; tx.extension = 'EXTEND'
+        uvn = nt.nodes.new('ShaderNodeUVMap'); uvn.uv_map = uvname; nt.links.new(uvn.outputs[0], tx.inputs['Vector']); texs.append(tx)
+    geo = nt.nodes.new('ShaderNodeNewGeometry'); sepn = nt.nodes.new('ShaderNodeSeparateXYZ'); nt.links.new(geo.outputs['Normal'], sepn.inputs[0])
+    gt = nt.nodes.new('ShaderNodeMath'); gt.operation = 'GREATER_THAN'; gt.inputs[1].default_value = 0.0; nt.links.new(sepn.outputs['X'], gt.inputs[0])
+    mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; nt.links.new(gt.outputs[0], mx.inputs['Factor'])
+    nt.links.new(texs[1].outputs['Color'], mx.inputs[6]); nt.links.new(texs[0].outputs['Color'], mx.inputs[7])
+    # photo colours include the studio light already: bring them to surface colour for re-lighting
+    gm = nt.nodes.new('ShaderNodeGamma'); gm.inputs[1].default_value = 1.6; nt.links.new(mx.outputs[2], gm.inputs[0])
+    br = nt.nodes.new('ShaderNodeBrightContrast'); br.inputs['Bright'].default_value = 0.0; nt.links.new(gm.outputs[0], br.inputs[0])
+    nt.links.new(br.outputs[0], pb.inputs['Base Color'])
+    me.materials.clear(); me.materials.append(pm); me.materials.append(cap_mat)
+    fabric = pm
+    print('backrest re-skinned from photos', boxes, flush=True)
+
 NEWBACK = os.environ.get('NEWBACK')
 if NEWBACK:
     # swap in the backrest rebuilt from the real photos, fitted to where the old one sat
