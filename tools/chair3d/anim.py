@@ -67,6 +67,12 @@ for p, name in enumerate(PART_NAMES):
 bpy.data.objects.remove(src)
 print('parts', sorted(objs), flush=True)
 
+# the AI texture reads mid-grey; darken it back to the real black mesh/plastic
+nt = mat.node_tree; pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
+if pb.inputs['Base Color'].links:
+    lk = pb.inputs['Base Color'].links[0]; g = nt.nodes.new('ShaderNodeGamma'); g.inputs[1].default_value = 1.8
+    nt.links.new(lk.from_socket, g.inputs[0]); nt.links.new(g.outputs[0], pb.inputs['Base Color'])
+
 # polished chrome for the base and gas lift (keeps the texture's dark details)
 chrome = mat.copy(); chrome.name = 'chrome'
 bsdf = [n for n in chrome.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'][0]
@@ -91,15 +97,15 @@ sc.render.resolution_x, sc.render.resolution_y = W, H; sc.render.fps = FPS
 sc.render.use_persistent_data = True
 sc.view_settings.view_transform = 'Standard'
 world = bpy.data.worlds.new('w'); sc.world = world; world.use_nodes = True
-bg = world.node_tree.nodes['Background']; bg.inputs[0].default_value = (0.62, 0.62, 0.64, 1); bg.inputs[1].default_value = 0.9
+bg = world.node_tree.nodes['Background']; bg.inputs[0].default_value = (0.62, 0.62, 0.64, 1); bg.inputs[1].default_value = 0.45
 
 def area(name, loc, energy, size):
     L = bpy.data.lights.new(name, 'AREA'); L.energy = energy; L.size = size
     o = bpy.data.objects.new(name, L); sc.collection.objects.link(o); o.location = loc
     o.rotation_euler = (-mathutils.Vector(loc)).to_track_quat('-Z', 'Y').to_euler(); return o
-area('key', (-1.2, -2.2, 2.2), 900, 2.5)
-area('fill', (1.8, -0.8, 1.0), 250, 3.0)
-area('rim', (-2.0, 1.8, 1.6), 500, 1.5)
+area('key', (-1.2, -2.2, 2.2), 520, 2.5)
+area('fill', (1.8, -0.8, 1.0), 140, 3.0)
+area('rim', (-2.0, 1.8, 1.6), 450, 1.5)
 bpy.ops.mesh.primitive_plane_add(size=8, location=(0, 0, FLOOR0)); floor = bpy.context.object
 floor.is_shadow_catcher = True
 
@@ -108,10 +114,10 @@ camo = bpy.data.objects.new('cam', cam); sc.collection.objects.link(camo); sc.ca
 
 def camera_at(t):
     k = smooth(t / 4.8)
-    az = math.radians(212 + 26 * k)                     # slow orbit around the back three-quarter
+    az = math.radians(228 + 24 * k)                     # slow orbit around the back three-quarter
     e = amount(3.5, t)                                  # pull back while the parts are apart
-    dist = 3.0 + 1.2 * e; el = math.radians(10)
-    target = mathutils.Vector((-0.08, 0.0, 0.0 - 0.08 * e))
+    dist = 3.0 + 1.8 * e; el = math.radians(10)
+    target = mathutils.Vector((-0.08 - 0.08 * e, 0.0, 0.0))
     pos = target + dist * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
     camo.location = pos; camo.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
 
@@ -121,7 +127,7 @@ def pose(t):
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, t)
     camera_at(t)
 
-frames = [0, 30, 60, 90] if MODE == 'test' else range(N + 1)
+frames = [0, 40, 60, 95] if MODE == 'test' else range(N + 1)
 import os; os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
