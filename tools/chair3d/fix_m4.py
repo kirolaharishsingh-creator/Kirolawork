@@ -108,7 +108,7 @@ for layer in (iv & (vn[:, 1] < 0), iv & (vn[:, 1] >= 0)):
     fits.append(cf)
 bm = bmesh.new(); bm.from_mesh(bk.data); bm.faces.ensure_lookup_table()
 bmesh.ops.delete(bm, geom=[f for f, k in zip(bm.faces, mesh_f) if k], context='FACES'); bm.to_mesh(bk.data); bm.free()
-sheet = ndimage.binary_dilation(inner, iterations=int(float(os.environ.get('TUCK', 0.008)) / STEP))
+sheet = ndimage.binary_dilation(inner, iterations=int(float(os.environ.get('TUCK', 0.012)) / STEP))
 ci, cj = np.nonzero(sheet); used = np.zeros((nx + 1, nz + 1), bool)
 for di in (0, 1):
     for dj in (0, 1): used[ci + di, cj + dj] = True
@@ -164,6 +164,76 @@ if os.environ.get('BASE', 'black') == 'chrome':
     c = face_centres(b); legs = np.hypot(c[:, 0] - ax[0], c[:, 1] - ax[1]) > float(os.environ.get('HUB_R', 0.055))
     mi = np.zeros(len(c), np.int32); mi[legs] = 1; b.data.polygons.foreach_set('material_index', mi); b.data.update()
     print('chrome legs:', int(legs.sum()), 'faces; hub stays black')
+
+# ---- clean materials (CLEAN=1): Tripo's colour maps carry painted-in shadows, smudges and seam lines.
+# Every remaining part gets a clean material in the real chair's colours; Tripo's normal maps stay, so the
+# moulded detail (seams, ribs, grain) is kept. Mesh areas get the real fabric photos.
+def clean_from(src, name, colour, rough, spec=0.35, sheen=0.0, weave=0.0):
+    m = src.copy(); m.name = name; nt = m.node_tree; pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
+    # Tripo's normal maps carry dark artefacts (dark blotches on arms, wheels, seat): off unless NORMALS=1
+    socks = ['Base Color', 'Metallic', 'Roughness'] + ([] if os.environ.get('NORMALS', '0') == '1' else ['Normal'])
+    for sock in socks:
+        for l in list(pb.inputs[sock].links): nt.links.remove(l)
+    pb.inputs['Base Color'].default_value = (*colour, 1); pb.inputs['Metallic'].default_value = 0.0
+    pb.inputs['Roughness'].default_value = rough; pb.inputs['Specular IOR Level'].default_value = spec
+    pb.inputs['Sheen Weight'].default_value = sheen; pb.inputs['Sheen Roughness'].default_value = 0.5
+    if weave:                                                  # fine woven-fabric grain (bump only)
+        tc = nt.nodes.new('ShaderNodeTexCoord'); wv = nt.nodes.new('ShaderNodeTexWave'); wv.inputs['Scale'].default_value = 900.0
+        wv.wave_type = 'BANDS'; wv.bands_direction = 'X'; nz = nt.nodes.new('ShaderNodeTexNoise'); nz.inputs['Scale'].default_value = 2500.0
+        nt.links.new(tc.outputs['Object'], wv.inputs['Vector']); nt.links.new(tc.outputs['Object'], nz.inputs['Vector'])
+        ad = nt.nodes.new('ShaderNodeMath'); ad.operation = 'ADD'; nt.links.new(wv.outputs['Fac'], ad.inputs[0]); nt.links.new(nz.outputs['Fac'], ad.inputs[1])
+        bp = nt.nodes.new('ShaderNodeBump'); bp.inputs['Strength'].default_value = weave; bp.inputs['Distance'].default_value = 0.0004
+        nt.links.new(ad.outputs[0], bp.inputs['Height']); nt.links.new(bp.outputs['Normal'], pb.inputs['Normal'])
+    return m
+
+def inner_region(o, ring, sel=None):
+    # faces well inside the part's outline seen from the front (x-z), i.e. away from its rim
+    v = verts(o); st = 0.0015; pad = 20
+    gx0, gz0 = v[:, 0].min() - pad * st, v[:, 2].min() - pad * st
+    gnx, gnz = int(np.ptp(v[:, 0]) / st) + 2 * pad + 1, int(np.ptp(v[:, 2]) / st) + 2 * pad + 1
+    s = np.zeros((gnx, gnz), bool); s[((v[:, 0] - gx0) / st).astype(int), ((v[:, 2] - gz0) / st).astype(int)] = True
+    s = ndimage.binary_fill_holes(ndimage.binary_closing(s, iterations=4))
+    s = ndimage.binary_erosion(ndimage.gaussian_filter(s.astype(float), 6) > 0.5, iterations=int(ring / st))
+    c = face_centres(o)
+    i = np.clip(((c[:, 0] - gx0) / st).astype(int), 0, gnx - 1); j = np.clip(((c[:, 2] - gz0) / st).astype(int), 0, gnz - 1)
+    return s[i, j]
+
+def planar_fabric_uvs(o, sel):
+    v = verts(o); lv = np.zeros(len(o.data.loops), int); o.data.loops.foreach_get('vertex_index', lv); p = v[lv]
+    c = face_centres(o)[sel]; x0_, x1_, z0_, z1_ = c[:, 0].min(), c[:, 0].max(), c[:, 2].min(), c[:, 2].max()
+    s = np.clip((p[:, 0] - x0_) / (x1_ - x0_), 0, 1); t = np.clip((p[:, 2] - z0_) / (z1_ - z0_), 0, 1)
+    for name, (u0, u1, v0, v1), su in (('front_uv', box_f, s), ('back_uv', box_b, 1 - s)):
+        o.data.uv_layers.new(name=name).data.foreach_set('uv', np.c_[u0 + su * (u1 - u0), v0 + t * (v1 - v0)].astype(np.float32).reshape(-1))
+
+def assign(o, sel, mat):
+    if mat.name not in [m.name for m in o.data.materials]: o.data.materials.append(mat)
+    k = [m.name for m in o.data.materials].index(mat.name)
+    mi = np.zeros(len(o.data.polygons), np.int32); o.data.polygons.foreach_get('material_index', mi); mi[sel] = k
+    o.data.polygons.foreach_set('material_index', mi); o.data.update()
+
+if os.environ.get('CLEAN', '1') == '1':
+    PL = tuple(float(x) for x in os.environ.get('PLASTIC_RGB', '0.026,0.026,0.028').split(','))
+    for i in (0, 9, 2, 10, 4, 3, 7, 8):                       # black plastic, each keeping its own normal map
+        o = P[i]; src = o.data.materials[0]; cm = clean_from(src, f'plastic_{i}', PL, 0.5)
+        o.data.materials[0] = cm
+    for i in (7, 8):                                          # armrest pads: soft-touch top
+        o = P[i]; c = face_centres(o); pad = c[:, 2] > c[:, 2].max() - 0.028
+        assign(o, pad, clean_from(o.data.materials[0], f'pad_{i}', (0.022, 0.022, 0.024), 0.78, spec=0.25, sheen=0.15))
+    s5 = P[5]; s5.data.materials[0] = clean_from(s5.data.materials[0], 'seat_fabric', (0.017, 0.017, 0.018), 0.95, spec=0.2, sheen=0.35, weave=0.12)
+    for i in GROUPS['wheels']:
+        o = P[i]; o.data.materials[0] = clean_from(o.data.materials[0], f'rubber_{i}', (0.02, 0.02, 0.021), 0.55)
+    # lumbar mesh, front and back, and the headrest's rear mesh: the same real fabric as the backrest
+    for i, ring in ((2, 0.022), (9, 0.016)):
+        o = P[i]; n = face_normals(o); inn = inner_region(o, ring)
+        fr_ = inn & (n[:, 1] < -0.2) if i == 2 else np.zeros(len(n), bool)
+        bk_ = inn & (n[:, 1] > 0.2)
+        if i == 9:                                            # keep the photo-wrapped headrest front as it is
+            mi = np.zeros(len(n), np.int32); o.data.polygons.foreach_get('material_index', mi); bk_ &= mi == 0
+        planar_fabric_uvs(o, fr_ | bk_)
+        if fr_.any(): assign(o, fr_, fab_f)
+        assign(o, bk_, fab_b)
+        print('fabric on part', i, 'front', int(fr_.sum()), 'back', int(bk_.sum()), 'faces')
+    print('clean materials applied')
 
 # ---- regroup into the animation's parts
 for g, ids in GROUPS.items():

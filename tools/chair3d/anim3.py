@@ -64,18 +64,37 @@ for m in mats:
     tripo_colour(m)
 
 def add_glow(m):
-    nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
+    # two effects while a part breaks away / locks back in:
+    #  - a thin light ray: a sharp cool-white line that sweeps across the part (bottom to top as it leaves,
+    #    top to bottom as it returns), driven by the object's 'sweep' (position) and 'ray' (brightness)
+    #  - a faint rim glow on the part's silhouette ('glow')
+    nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]; L = nt.links
     surf = out.inputs['Surface'].links[0].from_socket
-    lw = nt.nodes.new('ShaderNodeLayerWeight'); lw.inputs['Blend'].default_value = 0.2
-    pw = nt.nodes.new('ShaderNodeMath'); pw.operation = 'POWER'; pw.inputs[1].default_value = float(os.environ.get('GLOW_POW', 7.0))   # thin rim only
-    at = nt.nodes.new('ShaderNodeAttribute'); at.attribute_type = 'OBJECT'; at.attribute_name = 'glow'
-    mu = nt.nodes.new('ShaderNodeMath'); mu.operation = 'MULTIPLY'
-    mu2 = nt.nodes.new('ShaderNodeMath'); mu2.operation = 'MULTIPLY'; mu2.inputs[1].default_value = float(os.environ.get('GLOW', 1.2))   # tuned for the photo-matched light level (LIGHT 0.22)
-    em = nt.nodes.new('ShaderNodeEmission'); em.inputs['Color'].default_value = (0.82, 0.92, 1.0, 1)
-    add = nt.nodes.new('ShaderNodeAddShader'); L = nt.links
-    L.new(lw.outputs['Facing'], pw.inputs[0]); L.new(pw.outputs[0], mu.inputs[0]); L.new(at.outputs['Fac'], mu.inputs[1])
-    L.new(mu.outputs[0], mu2.inputs[0]); L.new(mu2.outputs[0], em.inputs['Strength'])
-    L.new(surf, add.inputs[0]); L.new(em.outputs[0], add.inputs[1]); L.new(add.outputs[0], out.inputs['Surface'])
+    def node(t, **kw):
+        n = nt.nodes.new(t)
+        for k, v in kw.items(): setattr(n, k, v)
+        return n
+    def attr(name):
+        a = node('ShaderNodeAttribute', attribute_type='OBJECT', attribute_name=name); return a.outputs['Fac']
+    def math(op, a, b):
+        n = node('ShaderNodeMath', operation=op)
+        for i, x in enumerate((a, b)):
+            if isinstance(x, (int, float)): n.inputs[i].default_value = x
+            else: L.new(x, n.inputs[i])
+        return n.outputs[0]
+    tc = node('ShaderNodeTexCoord'); sep = node('ShaderNodeSeparateXYZ'); L.new(tc.outputs['Generated'], sep.inputs[0])
+    pos = math('ADD', math('MULTIPLY', sep.outputs['Z'], 0.8), math('MULTIPLY', sep.outputs['X'], 0.2))   # slightly diagonal line
+    d = math('ABSOLUTE', math('SUBTRACT', pos, attr('sweep')), 0)
+    mr = node('ShaderNodeMapRange', interpolation_type='SMOOTHSTEP'); L.new(d, mr.inputs['Value'])
+    mr.inputs['From Min'].default_value = 0.0; mr.inputs['From Max'].default_value = float(os.environ.get('RAY_W', 0.018))
+    mr.inputs['To Min'].default_value = 1.0; mr.inputs['To Max'].default_value = 0.0
+    ray = math('MULTIPLY', math('MULTIPLY', mr.outputs['Result'], attr('ray')), float(os.environ.get('RAY', 6.0)))
+    lw = node('ShaderNodeLayerWeight'); lw.inputs['Blend'].default_value = 0.2
+    rim = math('MULTIPLY', math('MULTIPLY', math('POWER', lw.outputs['Facing'], float(os.environ.get('GLOW_POW', 7.0))), attr('glow')),
+               float(os.environ.get('GLOW', 0.6)))
+    em = node('ShaderNodeEmission'); em.inputs['Color'].default_value = (0.85, 0.93, 1.0, 1)
+    L.new(math('ADD', ray, rim), em.inputs['Strength'])
+    add = node('ShaderNodeAddShader'); L.new(surf, add.inputs[0]); L.new(em.outputs[0], add.inputs[1]); L.new(add.outputs[0], out.inputs['Surface'])
 for m in mats: add_glow(m)
 
 def centre(o):
@@ -133,10 +152,29 @@ def pose(f):
     pivot.rotation_euler = (0, 0, 2 * math.pi * u)                    # one full turn: frame N = frame 0
     for n, (i, off) in MOVES.items():
         k = amount(i, u); objs[n].location = (off[0] * k, off[1] * k, off[2] * k); objs[n]['glow'] = 4 * k * (1 - k)
+        objs[n]['sweep'] = -0.06 + 1.12 * k; objs[n]['ray'] = min(1.0, 8 * k * (1 - k))
     e = smooth((u - T_OUT + 0.03) / (T_HOLD - T_OUT)) * (1 - smooth((u - T_BACK) / (T_END - T_BACK + 0.03)))
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, u)
     camera_at(e)
     bpy.context.view_layer.update()
+
+if MODE == 'parts':
+    pose(0); floor.hide_render = True
+    sc.render.resolution_x = sc.render.resolution_y = int(os.environ.get('PRES', 700))
+    os.makedirs('parts', exist_ok=True)
+    order = os.environ.get('ONLY', 'headrest,backrest,frame,lumbar,seat,arm_l,arm_r,mechanism,gas_lift,base,wheel0').split(',')
+    views = [(f'v{i}', float(v.split('/')[0]), float(v.split('/')[1])) for i, v in enumerate(os.environ.get('VIEWS', '15/8,195/8,75/12').split(','))]
+    for n in order:
+        for o in objs.values(): o.hide_render = (o is not objs[n])
+        mw = objs[n].matrix_world; vv = [mw @ mathutils.Vector(c) for c in objs[n].bound_box]
+        lo = mathutils.Vector([min(p[i] for p in vv) for i in range(3)]); hi = mathutils.Vector([max(p[i] for p in vv) for i in range(3)])
+        c = (lo + hi) / 2; r = (hi - lo).length / 2
+        for side, azd, eld in views:
+            az, el = math.radians(azd), math.radians(eld); pos = c + 3.4 * r * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
+            camo.location = pos; camo.rotation_euler = (c - pos).to_track_quat('-Z', 'Y').to_euler(); cam.lens = 50
+            sc.render.filepath = f'{os.getcwd()}/parts/{n}_{side}.png'; bpy.ops.render.render(write_still=True)
+        print('part', n, flush=True)
+    sys.exit()
 
 frames = [int(f) for f in os.environ.get('FRAMES', '0,30,57').split(',')] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1)
 os.makedirs('frames', exist_ok=True)
