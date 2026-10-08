@@ -146,9 +146,11 @@ def plane_split(a, b, z, region):
 HUBXY = (0.01, 0.0)
 near_hub = lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.07
 if os.environ.get('PLANES', '1') == '1':
-    plane_split('seat', 'mechanism', -0.168, lambda x, y: x > -0.17)
-    plane_split('mechanism', 'gas_lift', -0.255, near_hub)
-    plane_split('gas_lift', 'base', -0.345, near_hub)
+    # only under the mechanism's own footprint, so the seat keeps its whole underside
+    plane_split('seat', 'mechanism', -0.172, lambda x, y: -0.08 < x < 0.16 and abs(y) < 0.1)
+    plane_split('mechanism', 'gas_lift', -0.255, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045)
+    # the column only: the hub socket and arm roots stay with the base
+    plane_split('gas_lift', 'base', -0.36, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.035)
     for i in range(5):
         o = objs['wheel%d' % i]; v = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
         wx, wy = v[:, 0].mean(), v[:, 1].mean()
@@ -285,7 +287,7 @@ if MODE == 'parts':
         v = np.zeros(len(objs[n].data.vertices) * 3); objs[n].data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
         c = mathutils.Vector(((v.min(0) + v.max(0)) / 2).tolist()); r = float(np.linalg.norm(v.max(0) - v.min(0))) / 2
         for side, azd in (('a', 228), ('b', 40)):
-            az = math.radians(azd); el = math.radians(15); d = r / math.tan(math.radians(9)) + r
+            az = math.radians(azd); el = math.radians(15); d = 3.1 * r
             pos = c + d * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
             camo.location = pos; camo.rotation_euler = (c - pos).to_track_quat('-Z', 'Y').to_euler()
             sc.render.filepath = f'/home/user/parts/{n}_{side}.png'; bpy.ops.render.render(write_still=True)
