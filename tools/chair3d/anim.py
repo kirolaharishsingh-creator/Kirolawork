@@ -81,7 +81,9 @@ pb.inputs['Specular IOR Level'].default_value = 0.3
 # polished chrome for the base and gas lift (keeps the texture's dark details)
 chrome = chrome_src; chrome.name = 'chrome'
 bsdf = [n for n in chrome.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'][0]
-for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].links): chrome.node_tree.links.remove(l)
+for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].links) + list(bsdf.inputs['Base Color'].links):
+    chrome.node_tree.links.remove(l)
+bsdf.inputs['Base Color'].default_value = (0.9, 0.9, 0.92, 1)
 bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.12
 for n in ('base', 'gas_lift'):
     objs[n].data.materials[0] = chrome
