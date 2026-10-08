@@ -103,25 +103,45 @@ for p, name in enumerate(PART_NAMES):
     o = bpy.data.objects.new(name, m2); bpy.context.scene.collection.objects.link(o); objs[name] = o
 bpy.data.objects.remove(src)
 
+def mesh_arrays(m):
+    nv = len(m.vertices); co_ = np.zeros(nv * 3, np.float32); m.vertices.foreach_get('co', co_)
+    nl = len(m.loops); lv_ = np.zeros(nl, np.int32); m.loops.foreach_get('vertex_index', lv_)
+    nf = len(m.polygons); ls_ = np.zeros(nf, np.int32); m.polygons.foreach_get('loop_start', ls_)
+    lt_ = np.zeros(nf, np.int32); m.polygons.foreach_get('loop_total', lt_)
+    uv_ = np.zeros(nl * 2, np.float32); m.uv_layers[0].data.foreach_get('uv', uv_)
+    return co_.reshape(-1, 3), lv_, ls_, lt_, uv_.reshape(-1, 2)
+
+def mesh_from_arrays(name, co_, lv_, ls_, mi_, uv_):
+    m = bpy.data.meshes.new(name)
+    m.vertices.add(len(co_)); m.vertices.foreach_set('co', co_.reshape(-1))
+    m.loops.add(len(lv_)); m.loops.foreach_set('vertex_index', lv_)
+    m.polygons.add(len(ls_)); m.polygons.foreach_set('loop_start', ls_)
+    m.uv_layers.new(); m.uv_layers[0].data.foreach_set('uv', uv_.reshape(-1))
+    m.polygons.foreach_set('material_index', mi_); m.update(); return m
+
 def plane_split(a, b, z, region):
     # re-divide parts a (above) and b (below) along the flat plane at height z, inside region(x, y):
     # a clean straight cut instead of the AI model's ragged patchwork seam
-    bm = bmesh.new(); bm.from_mesh(objs[a].data); na = len(bm.faces)
-    own = bm.faces.layers.int.new('own')
-    bm.from_mesh(objs[b].data); bm.faces.ensure_lookup_table()
-    for i, f in enumerate(bm.faces): f[own] = 0 if i < na else 1
+    A, B = mesh_arrays(objs[a].data), mesh_arrays(objs[b].data)
+    nva, nla = len(A[0]), len(A[1])
+    joined = mesh_from_arrays('join', np.concatenate([A[0], B[0]]), np.concatenate([A[1], B[1] + nva]),
+                              np.concatenate([A[2], B[2] + nla]),
+                              np.concatenate([np.zeros(len(A[2]), np.int32), np.ones(len(B[2]), np.int32)]),
+                              np.concatenate([A[4], B[4]]))
+    bm = bmesh.new(); bm.from_mesh(joined); bpy.data.meshes.remove(joined)
     geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
     bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(0, 0, z), plane_no=(0, 0, 1))
     for f in bm.faces:
         c = f.calc_center_median()
-        if region(c.x, c.y): f[own] = 0 if c.z > z else 1
+        if region(c.x, c.y): f.material_index = 0 if c.z > z else 1
     for name, keep in ((a, 0), (b, 1)):
-        bm2 = bm.copy(); o2 = bm2.faces.layers.int['own']
-        bmesh.ops.delete(bm2, geom=[f for f in bm2.faces if f[o2] != keep], context='FACES')
+        bm2 = bm.copy()
+        bmesh.ops.delete(bm2, geom=[f for f in bm2.faces if f.material_index != keep], context='FACES')
         bmesh.ops.delete(bm2, geom=[v for v in bm2.verts if not v.link_faces], context='VERTS')
+        for f in bm2.faces: f.material_index = 0
         bm2.to_mesh(objs[name].data); bm2.free(); objs[name].data.update()
     bm.free()
-    print('split', a, b, z, flush=True)
+    print('split', a, b, z, len(objs[a].data.polygons), len(objs[b].data.polygons), flush=True)
 
 HUBXY = (0.01, 0.0)
 near_hub = lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.07
