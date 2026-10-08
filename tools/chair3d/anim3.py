@@ -1,7 +1,8 @@
 # Turntable exploded view (the Tripo "Explosion" look): the chair turns a full 360 degrees while its parts
 # fly far apart into a vertical stack (headrest on top, base and wheels at the bottom, armrests out to the
 # sides), hold, and come back together. The last frame is identical to the first.
-# Uses chair_fixed.blend from fix_m4.py / tripo_fix.py.
+# Uses chair_fixed.blend from fix_m8.py (or fix_m4.py / tripo_fix.py).
+# Defaults match the real 3/4 product photo (kf1B): angle, deep blacks, soft shadow under the chair.
 # Usage: python3 anim3.py test|full   (env: BLEND, RES, SAMPLES, FRAMES, F0, F1, LIGHT, TEX_GAMMA, DURATION)
 import bpy, sys, os, math, time, numpy as np, mathutils
 
@@ -114,22 +115,24 @@ sc.render.engine = 'CYCLES'; sc.cycles.device = 'CPU'; sc.cycles.samples = SAMPL
 sc.cycles.use_denoising = True; sc.render.film_transparent = True
 sc.render.resolution_x, sc.render.resolution_y = W, H; sc.render.fps = FPS
 sc.render.use_persistent_data = True; sc.view_settings.view_transform = 'Standard'
-LIGHT = float(os.environ.get('LIGHT', 0.22))
+LIGHT = float(os.environ.get('LIGHT', 0.09))
 world = bpy.data.worlds.new('w'); sc.world = world; world.use_nodes = True
 bg = world.node_tree.nodes['Background']; bg.inputs[0].default_value = (0.62, 0.62, 0.64, 1); bg.inputs[1].default_value = 0.45 * LIGHT
 
 # chrome needs something bright to reflect: glossy rays see the full-strength studio surround
 _wn, _wl = world.node_tree.nodes, world.node_tree.links
 _out = [n for n in _wn if n.type == 'OUTPUT_WORLD'][0]
-_bg2 = _wn.new('ShaderNodeBackground'); _bg2.inputs[0].default_value = (0.62, 0.62, 0.64, 1); _bg2.inputs[1].default_value = float(os.environ.get('CHROME_ENV', 0.5))
+_bg2 = _wn.new('ShaderNodeBackground'); _bg2.inputs[0].default_value = (0.62, 0.62, 0.64, 1); _bg2.inputs[1].default_value = float(os.environ.get('CHROME_ENV', 0.3))
 _lp = _wn.new('ShaderNodeLightPath'); _mx = _wn.new('ShaderNodeMixShader')
 _wl.new(_lp.outputs['Is Glossy Ray'], _mx.inputs[0]); _wl.new(bg.outputs[0], _mx.inputs[1]); _wl.new(_bg2.outputs[0], _mx.inputs[2]); _wl.new(_mx.outputs[0], _out.inputs['Surface'])
 
+LROT = math.radians(float(os.environ.get('LIGHT_ROT', 23)))      # turn the light rig with the camera (CAM_AZ - 15)
 def area(name, loc, energy, size):
+    loc = (loc[0] * math.cos(LROT) - loc[1] * math.sin(LROT), loc[0] * math.sin(LROT) + loc[1] * math.cos(LROT), loc[2])
     L = bpy.data.lights.new(name, 'AREA'); L.energy = energy * LIGHT; L.size = size
     o = bpy.data.objects.new(name, L); sc.collection.objects.link(o); o.location = loc
     o.rotation_euler = (-mathutils.Vector(loc)).to_track_quat('-Z', 'Y').to_euler(); return o
-area('key', (2.2, -1.4, 2.2), 520, 2.5)       # front-left key, front fill, back rim: the camera looks from the front
+area('key', (2.2, -1.4, 2.2), 520, float(os.environ.get('KEY_SIZE', 6)))       # front-left key, front fill, back rim: the camera looks from the front
 area('fill', (1.6, 1.8, 0.8), 160, 3.0)
 area('rim', (-2.2, 0.6, 1.8), 450, 1.5)
 bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 0, FLOOR0)); floor = bpy.context.object
@@ -137,9 +140,9 @@ floor.is_shadow_catcher = True; floor.visible_glossy = False
 
 cam = bpy.data.cameras.new('cam'); cam.lens = 50
 camo = bpy.data.objects.new('cam', cam); sc.collection.objects.link(camo); sc.camera = camo
-AZ = math.radians(float(os.environ.get('CAM_AZ', 15)))     # a little off straight-front
-EL = math.radians(float(os.environ.get('CAM_EL', 6)))
-D0, D1 = float(os.environ.get('D0', 3.4)), float(os.environ.get('D1', 7.0))
+AZ = math.radians(float(os.environ.get('CAM_AZ', 38)))     # a little off straight-front
+EL = math.radians(float(os.environ.get('CAM_EL', 10)))
+D0, D1 = float(os.environ.get('D0', 3.1)), float(os.environ.get('D1', 7.0))
 
 def camera_at(e):
     dist = D0 + (D1 - D0) * e
