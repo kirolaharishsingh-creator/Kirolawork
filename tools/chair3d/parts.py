@@ -73,4 +73,7 @@ def label_components(co, lab, tri=None):
     cpart = np.array([PART_NAMES.index(nm) for nm in names])
     if tri is not None:
         cpart = smooth_parts(cpart, component_adjacency(co, lab, tri), cnt)
+    # the headrest lock: the tongue that sits in the V notch at the top of the backrest travels with the headrest
+    lock = (np.abs(cen[:, 1]) < 0.035) & (cen[:, 2] > 0.28) & (cen[:, 2] < 0.385) & (cen[:, 0] > -0.215)
+    cpart[lock] = PART_NAMES.index('headrest')
     return cpart

@@ -91,6 +91,14 @@ nt = mat.node_tree; pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
 if pb.inputs['Base Color'].links:
     lk = pb.inputs['Base Color'].links[0]; g = nt.nodes.new('ShaderNodeGamma'); g.inputs[1].default_value = 2.2
     nt.links.new(lk.from_socket, g.inputs[0]); nt.links.new(g.outputs[0], pb.inputs['Base Color'])
+# cap the texture's brightness: the AI texture has light blotches in the mesh fabric that read as patches
+sepc = nt.nodes.new('ShaderNodeSeparateColor'); comb = nt.nodes.new('ShaderNodeCombineColor')
+src_sock = pb.inputs['Base Color'].links[0].from_socket
+nt.links.new(src_sock, sepc.inputs[0])
+for ch in range(3):
+    mn = nt.nodes.new('ShaderNodeMath'); mn.operation = 'MINIMUM'; mn.inputs[1].default_value = 0.045
+    nt.links.new(sepc.outputs[ch], mn.inputs[0]); nt.links.new(mn.outputs[0], comb.inputs[ch])
+nt.links.new(comb.outputs[0], pb.inputs['Base Color'])
 # black plastic/fabric: no metal, soft low sheen (the ORM map's metallic made it read grey)
 chrome_src = mat.copy()
 for l in list(pb.inputs['Metallic'].links): nt.links.remove(l)
@@ -177,7 +185,7 @@ def pose(t):
     camera_at(t)
 
 import os
-frames = [14, 30, 60, 84] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
+frames = [0, 60] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
     sc.render.filepath = f'/home/user/frames/{f:04d}.png'; sc.render.image_settings.file_format = 'PNG'
