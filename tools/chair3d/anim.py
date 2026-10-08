@@ -306,7 +306,7 @@ if PROJBACK:
     fabric = pm
     # backing sheet of the same fabric 2 mm behind the front surface, so the model's pin-holes never show through
     NY, NZ = 140, 120; gy = np.linspace(-0.138, 0.138, NY); gz = np.linspace(0.125, 0.355, NZ)
-    GY, GZ = np.meshgrid(gy, gz); GX = basis(GY.ravel(), GZ.ravel()) @ front_coef - 0.002
+    GY, GZ = np.meshgrid(gy, gz); GX = basis(GY.ravel(), GZ.ravel()) @ front_coef + float(os.environ.get('SHEET_OFF', 0.0012))   # clean fabric sheet just in front of the holed surface
     gv = np.c_[GX, GY.ravel(), GZ.ravel()]
     q = np.arange(NY * NZ).reshape(NZ, NY); quads = np.c_[q[:-1, :-1].ravel(), q[:-1, 1:].ravel(), q[1:, 1:].ravel(), q[1:, :-1].ravel()]
     bk = bpy.data.meshes.new('backrest_backing'); bk.from_pydata(gv.tolist(), [], quads.tolist())
