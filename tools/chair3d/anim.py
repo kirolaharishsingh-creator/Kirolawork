@@ -408,6 +408,24 @@ if HEAD_SKIN:
     hme.materials[0] = hm
     print('headrest front re-skinned from photo', round(hy0, 3), round(hy1, 3), round(hz0, 3), round(hz1, 3), flush=True)
 
+STRAP_Z = os.environ.get('STRAP_Z')         # top of the headrest above this is the padded fabric strap
+if STRAP_Z:
+    sm = bpy.data.materials.new('headrest_strap'); sm.use_nodes = True; nt = sm.node_tree
+    pb = nt.nodes['Principled BSDF']; pb.inputs['Base Color'].default_value = (0.03, 0.03, 0.032, 1)
+    pb.inputs['Roughness'].default_value = 0.85; pb.inputs['Specular IOR Level'].default_value = 0.2
+    pb.inputs['Sheen Weight'].default_value = 0.6; pb.inputs['Sheen Roughness'].default_value = 0.35
+    tc = nt.nodes.new('ShaderNodeTexCoord'); nz = nt.nodes.new('ShaderNodeTexNoise'); nz.inputs['Scale'].default_value = 900.0
+    wv = nt.nodes.new('ShaderNodeTexWave'); wv.inputs['Scale'].default_value = 260.0; wv.bands_direction = 'Y'
+    nt.links.new(tc.outputs['Object'], nz.inputs['Vector']); nt.links.new(tc.outputs['Object'], wv.inputs['Vector'])
+    ad = nt.nodes.new('ShaderNodeMath'); ad.operation = 'ADD'; nt.links.new(nz.outputs['Fac'], ad.inputs[0]); nt.links.new(wv.outputs['Fac'], ad.inputs[1])
+    bp = nt.nodes.new('ShaderNodeBump'); bp.inputs['Strength'].default_value = 0.25; bp.inputs['Distance'].default_value = 0.0006
+    nt.links.new(ad.outputs[0], bp.inputs['Height']); nt.links.new(bp.outputs['Normal'], pb.inputs['Normal'])
+    hme = objs['headrest'].data; hme.materials.append(sm); si = len(hme.materials) - 1
+    zs = float(STRAP_Z); n = 0
+    for p in hme.polygons:
+        if p.center.z > zs and p.normal.z > -0.3: p.material_index = si; n += 1
+    hme.update(); print('headrest strap faces', n, flush=True)
+
 NEWBACK = os.environ.get('NEWBACK')
 if NEWBACK:
     # swap in the backrest rebuilt from the real photos, fitted to where the old one sat
@@ -467,6 +485,7 @@ def add_glow(m):
     L.new(mu.outputs[0], mu2.inputs[0]); L.new(mu2.outputs[0], em.inputs['Strength'])
     L.new(surf, add.inputs[0]); L.new(em.outputs[0], add.inputs[1]); L.new(add.outputs[0], out.inputs['Surface'])
 for m in {mat, chrome, cap_mat, fabric, *objs['backrest'].data.materials, *objs['headrest'].data.materials}: add_glow(m)
+# (strap material is among the headrest materials, so it glows with the headrest)
 
 # wheel offsets: straight down plus outward from the hub
 hub = np.array([0.01, 0.0])
