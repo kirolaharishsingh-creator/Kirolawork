@@ -258,6 +258,18 @@ if NEWBACK:
     nm = nb.data; nm.transform(nb.matrix_world); nb.matrix_world = mathutils.Matrix.Identity(4)
     nv = np.zeros(len(nm.vertices) * 3); nm.vertices.foreach_get('co', nv); nv = nv.reshape(-1, 3)
     ext = nv.max(0) - nv.min(0); print('new backrest extents xyz', ext.round(3), flush=True)
+    FACE = os.environ.get('NEWBACK_FACE')            # e.g. '+x': Tripo built a box; keep only that clean face
+    if FACE:
+        ax = 'xyz'.index(FACE[1]); sgn = 1 if FACE[0] == '+' else -1
+        d = float(os.environ.get('NEWBACK_DEPTH', 0.08)) * ext[ax]
+        edge = nv[:, ax].max() - d if sgn > 0 else nv[:, ax].min() + d
+        keepv = (nv[:, ax] > edge) if sgn > 0 else (nv[:, ax] < edge)
+        bm = bmesh.new(); bm.from_mesh(nm); bm.verts.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if not all(keepv[v.index] for v in f.verts)], context='FACES')
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+        bm.to_mesh(nm); bm.free(); nm.update()
+        nv = np.zeros(len(nm.vertices) * 3); nm.vertices.foreach_get('co', nv); nv = nv.reshape(-1, 3)
+        ext = nv.max(0) - nv.min(0); print('kept face', FACE, 'extents', ext.round(3), flush=True)
     thin = int(np.argmin(ext)); horiz = [i for i in (0, 1) if i != thin][0] if thin != 2 else 1
     # local frame of the new panel: u = across, w = up, t = thickness (sign: +t is the panel's front)
     u, w, t = nv[:, horiz], nv[:, 2], nv[:, thin]
@@ -273,7 +285,9 @@ if NEWBACK:
     X = mid + (t - (t.max() + t.min()) / 2) * s
     nm.vertices.foreach_set('co', np.c_[X, Y, Z].reshape(-1)); nm.update()
     for p in nm.polygons: p.use_smooth = True
-    for m in nm.materials: treat_black(m); black_backfaces(m)
+    for m in nm.materials:
+        treat_black(m)
+        if not FACE: black_backfaces(m)
     bpy.data.objects.remove(old); nb.name = 'backrest'; objs['backrest'] = nb
     print('new backrest fitted, scale', round(s, 4), flush=True)
 
