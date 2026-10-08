@@ -450,6 +450,36 @@ if HEAD_REPLACE:
     bpy.data.objects.remove(old); nh.name = 'headrest'; objs['headrest'] = nh
     print('headrest replaced from', HEAD_REPLACE, 'scale', round(float(s), 3), flush=True)
 
+HEAD_PHOTO = os.environ.get('HEAD_PHOTO')   # real headrest front (photo 15, cropped to the pad's left, right and top edges)
+if HEAD_PHOTO:
+    ho = objs['headrest']; hme = ho.data
+    hv = np.zeros(len(hme.vertices) * 3); hme.vertices.foreach_get('co', hv); hv = hv.reshape(-1, 3)
+    hn = np.zeros(len(hme.vertices) * 3); hme.vertices.foreach_get('normal', hn); hn = hn.reshape(-1, 3)
+    pad = (hn[:, 0] > 0.3) & (hv[:, 2] > float(os.environ.get('HB_Z', 0.376)))
+    hy0, hy1 = np.percentile(hv[pad, 1], [0.2, 99.8]); hz1 = np.percentile(hv[pad, 2], 99.8)
+    img = bpy.data.images.load(os.path.abspath(HEAD_PHOTO)); ar = img.size[0] / img.size[1]
+    hl = np.zeros(len(hme.loops), np.int32); hme.loops.foreach_get('vertex_index', hl); P = hv[hl]
+    # same scale across and down, anchored at the pad's top edge, so the mesh panels keep their real shape
+    uu = (P[:, 1] - hy0) / (hy1 - hy0); vv = 1 - (hz1 - P[:, 2]) / (hy1 - hy0) * ar
+    hme.uv_layers.new(name='head_uv').data.foreach_set('uv', np.c_[uu, vv].astype(np.float32).reshape(-1))
+    for i, m in enumerate(hme.materials):
+        if m.name.startswith('cap'): continue
+        hm = m.copy(); hm.name = m.name + '_photo'; nt = hm.node_tree
+        pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
+        lk = pb.inputs['Base Color'].links; orig = lk[0].from_socket if lk else None
+        tx = nt.nodes.new('ShaderNodeTexImage'); tx.image = img; tx.extension = 'EXTEND'
+        uvn = nt.nodes.new('ShaderNodeUVMap'); uvn.uv_map = 'head_uv'; nt.links.new(uvn.outputs[0], tx.inputs['Vector'])
+        gm = nt.nodes.new('ShaderNodeGamma'); gm.inputs[1].default_value = 1.6; nt.links.new(tx.outputs['Color'], gm.inputs[0])
+        geo = nt.nodes.new('ShaderNodeNewGeometry'); sx = nt.nodes.new('ShaderNodeSeparateXYZ'); nt.links.new(geo.outputs['Normal'], sx.inputs[0])
+        mr = nt.nodes.new('ShaderNodeMapRange'); mr.inputs['From Min'].default_value = 0.2; mr.inputs['From Max'].default_value = 0.45
+        nt.links.new(sx.outputs['X'], mr.inputs['Value'])
+        mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; nt.links.new(mr.outputs['Result'], mx.inputs['Factor'])
+        if orig: nt.links.new(orig, mx.inputs[6])
+        else: mx.inputs[6].default_value = pb.inputs['Base Color'].default_value
+        nt.links.new(gm.outputs[0], mx.inputs[7]); nt.links.new(mx.outputs[2], pb.inputs['Base Color'])
+        hme.materials[i] = hm
+    print('headrest front from photo', HEAD_PHOTO, flush=True)
+
 NEWBACK = os.environ.get('NEWBACK')
 if NEWBACK:
     # swap in the backrest rebuilt from the real photos, fitted to where the old one sat
