@@ -139,9 +139,36 @@ for src, dst in ((o, fr),):                 # (the backrest is one piece; the sp
         piece = src.copy(); piece.data = src.data.copy(); bpy.context.scene.collection.objects.link(piece)
         delete_faces(src, go); delete_faces(piece, ~go); moved += int(go.sum())
         bpy.ops.object.select_all(action='DESELECT'); piece.select_set(True); dst.select_set(True); bpy.context.view_layer.objects.active = dst; bpy.ops.object.join()
-print('split tidy: moved', moved, 'faces of loose islands')
+# pieces left loose on the spine (bracket ends cut by the split) would float on their own: each joins the part
+# it touches (backrest or lumbar), otherwise it is dropped
+isl = islands(fr); big = max(len(x) for x in isl); c = face_centres(fr)
+targets = [(o, cKDTree(face_centres(o))), (P[1], cKDTree(face_centres(P[1])))]
+give = {id(o): np.zeros(len(c), bool), id(P[1]): np.zeros(len(c), bool)}; stub = np.zeros(len(c), bool)
+for x in isl:
+    if len(x) >= 0.05 * big: continue
+    d = [t.query(c[x])[0].min() for _, t in targets]; k = int(np.argmin(d))
+    if d[k] < 0.01: give[id(targets[k][0])][x] = True
+    else: stub[x] = True
+for dst, _ in targets:
+    sel = give[id(dst)]
+    if not sel.any(): continue
+    piece = fr.copy(); piece.data = fr.data.copy(); bpy.context.scene.collection.objects.link(piece); delete_faces(piece, ~sel)
+    piece.data.materials.clear(); [piece.data.materials.append(x) for x in dst.data.materials]
+    piece.data.polygons.foreach_set('material_index', np.zeros(len(piece.data.polygons), np.int32))
+    bpy.ops.object.select_all(action='DESELECT'); piece.select_set(True); dst.select_set(True); bpy.context.view_layer.objects.active = dst; bpy.ops.object.join()
+moved_out = sum(int(v.sum()) for v in give.values())
+delete_faces(fr, stub | give[id(o)] | give[id(P[1])])
+print('split tidy: moved', moved, 'faces of loose islands; spine pieces given to backrest/lumbar', moved_out, 'dropped', int(stub.sum()))
 P[80] = fr; GROUPS['frame'].append(80)
 print('spine split:', int(spine.sum()), 'faces')
+
+# ---- crumbs: tiny loose islands left at the panel seams would float as specks once the parts fly apart
+for i in (0, 1, 2):
+    o = P[i]; bm = bmesh.new(); bm.from_mesh(o.data); bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5); bm.to_mesh(o.data); bm.free()
+    isl = islands(o); big = max(len(x) for x in isl); crumbs = np.zeros(len(o.data.polygons), bool)
+    for x in isl:
+        if len(x) < float(os.environ.get('CRUMB', 0.005)) * big: crumbs[x] = True
+    delete_faces(o, crumbs); print('part', i, 'crumbs removed:', int(crumbs.sum()), 'faces')
 
 # ---- materials: Tripo's maps carry painted shadows, smudges and a blotchy normal map; everything gets a clean
 # material in the real chair's colours (calibrated against the real photos with anim3's LIGHT=0.22)

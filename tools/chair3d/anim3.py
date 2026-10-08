@@ -90,6 +90,12 @@ def add_glow(m):
     mr.inputs['From Min'].default_value = 0.0; mr.inputs['From Max'].default_value = float(os.environ.get('RAY_W', 0.018))
     mr.inputs['To Min'].default_value = 1.0; mr.inputs['To Max'].default_value = 0.0
     ray = math('MULTIPLY', math('MULTIPLY', mr.outputs['Result'], attr('ray')), float(os.environ.get('RAY', 6.0)))
+    # on flat, level faces (seat underside, base top) the band would light the whole face at once: keep it on the sides
+    geo = node('ShaderNodeNewGeometry'); gn = node('ShaderNodeSeparateXYZ'); L.new(geo.outputs['Normal'], gn.inputs[0])
+    lv = node('ShaderNodeMapRange', interpolation_type='SMOOTHSTEP'); L.new(math('ABSOLUTE', gn.outputs['Z'], 0), lv.inputs['Value'])
+    lv.inputs['From Min'].default_value = 0.55; lv.inputs['From Max'].default_value = 0.85
+    lv.inputs['To Min'].default_value = 1.0; lv.inputs['To Max'].default_value = 0.0
+    ray = math('MULTIPLY', ray, lv.outputs['Result'])
     lw = node('ShaderNodeLayerWeight'); lw.inputs['Blend'].default_value = 0.2
     rim = math('MULTIPLY', math('MULTIPLY', math('POWER', lw.outputs['Facing'], float(os.environ.get('GLOW_POW', 7.0))), attr('glow')),
                float(os.environ.get('GLOW', 0.6)))
@@ -179,6 +185,7 @@ if MODE == 'parts':
         print('part', n, flush=True)
     sys.exit()
 
+for _n in filter(None, os.environ.get('HIDE', '').split(',')): objs[_n].hide_render = True    # debugging aid
 frames = [int(f) for f in os.environ.get('FRAMES', '0,30,57').split(',')] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1)
 os.makedirs('frames', exist_ok=True)
 for f in frames:
