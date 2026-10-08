@@ -84,7 +84,7 @@ bsdf = [n for n in chrome.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'][0]
 for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].links) + list(bsdf.inputs['Base Color'].links):
     chrome.node_tree.links.remove(l)
 bsdf.inputs['Base Color'].default_value = (0.9, 0.9, 0.92, 1)
-bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.12
+bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.08
 for n in ('base', 'gas_lift'):
     objs[n].data.materials[0] = chrome
 
@@ -104,7 +104,14 @@ sc.render.resolution_x, sc.render.resolution_y = W, H; sc.render.fps = FPS
 sc.render.use_persistent_data = True
 sc.view_settings.view_transform = 'Standard'
 world = bpy.data.worlds.new('w'); sc.world = world; world.use_nodes = True
-bg = world.node_tree.nodes['Background']; bg.inputs[0].default_value = (0.62, 0.62, 0.64, 1); bg.inputs[1].default_value = 0.45
+bg = world.node_tree.nodes['Background']; bg.inputs[1].default_value = 0.45
+# studio gradient for the chrome to reflect: dark floor, bright ceiling
+wn, wl = world.node_tree.nodes, world.node_tree.links
+tc = wn.new('ShaderNodeTexCoord'); sep = wn.new('ShaderNodeSeparateXYZ'); ramp = wn.new('ShaderNodeValToRGB')
+wl.new(tc.outputs['Generated'], sep.inputs[0]); wl.new(sep.outputs['Z'], ramp.inputs['Fac'])
+ramp.color_ramp.elements[0].position = 0.45; ramp.color_ramp.elements[0].color = (0.04, 0.04, 0.045, 1)
+ramp.color_ramp.elements[1].position = 0.62; ramp.color_ramp.elements[1].color = (0.95, 0.95, 0.97, 1)
+wl.new(ramp.outputs['Color'], bg.inputs[0])
 
 def area(name, loc, energy, size):
     L = bpy.data.lights.new(name, 'AREA'); L.energy = energy; L.size = size
@@ -134,8 +141,8 @@ def pose(t):
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, t)
     camera_at(t)
 
-frames = [0, 60] if MODE == 'test' else range(N + 1)
-import os; os.makedirs('frames', exist_ok=True)
+import os
+frames = [0, 60] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
     sc.render.filepath = f'/home/user/frames/{f:04d}.png'; sc.render.image_settings.file_format = 'PNG'
