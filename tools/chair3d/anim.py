@@ -513,8 +513,9 @@ if MODE == 'parts':
             for ch in o.children: ch.hide_render = o.hide_render
         v = np.zeros(len(objs[n].data.vertices) * 3); objs[n].data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
         c = mathutils.Vector(((v.min(0) + v.max(0)) / 2).tolist()); r = float(np.linalg.norm(v.max(0) - v.min(0))) / 2
-        for side, azd in (('a', 228), ('b', 40)):
-            az = math.radians(azd); el = math.radians(15); d = 3.1 * r
+        views = [('a', 228, 15), ('b', 40, 15)] if not os.environ.get('VIEWS') else [(f'v{i}', float(s.split('/')[0]), float(s.split('/')[1])) for i, s in enumerate(os.environ['VIEWS'].split(','))]
+        for side, azd, eld in views:
+            az = math.radians(azd); el = math.radians(eld); d = 3.1 * r
             pos = c + d * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
             camo.location = pos; camo.rotation_euler = (c - pos).to_track_quat('-Z', 'Y').to_euler()
             sc.render.filepath = f'{os.getcwd()}/parts/{n}_{side}.png'; bpy.ops.render.render(write_still=True)
