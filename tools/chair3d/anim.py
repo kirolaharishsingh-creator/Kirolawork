@@ -145,7 +145,10 @@ def plane_split(a, b, z, region, claim_above=None, outside_to_b=False):
     bm.free()
     print('split', a, b, z, len(objs[a].data.polygons), len(objs[b].data.polygons), flush=True)
 
-HUBXY = (0.01, 0.0)
+_g = objs['gas_lift'].data; _gv = np.zeros(len(_g.vertices) * 3); _g.vertices.foreach_get('co', _gv); _gv = _gv.reshape(-1, 3)
+_col = _gv[(_gv[:, 2] > -0.32) & (_gv[:, 2] < -0.27)]
+HUBXY = tuple(((_col[:, :2].min(0) + _col[:, :2].max(0)) / 2).tolist()) if len(_col) else (0.01, 0.0)
+print('hub centre', HUBXY, flush=True)
 near_hub = lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.07
 if os.environ.get('PLANES', '1') == '1':
     # only under the mechanism's own footprint, so the seat keeps its whole underside
@@ -154,8 +157,8 @@ if os.environ.get('PLANES', '1') == '1':
     # the column only: the hub socket and arm roots stay with the base
     plane_split('gas_lift', 'base', -0.36, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.035, outside_to_b=True)
     # armrests end in a clean cut where their bracket meets the seat
-    plane_split('arm_r', 'seat', -0.16, lambda x, y: y > 0.15)
-    plane_split('arm_l', 'seat', -0.16, lambda x, y: y < -0.15)
+    plane_split('arm_r', 'seat', -0.16, lambda x, y: y > 0.21)       # outside the cushion's edge only
+    plane_split('arm_l', 'seat', -0.16, lambda x, y: y < -0.21)
     for i in range(5):
         o = objs['wheel%d' % i]; v = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
         wx, wy = v[:, 0].mean(), v[:, 1].mean()
@@ -201,7 +204,7 @@ def fabric_material(src_mat):
     f = src_mat.copy(); f.name = 'backrest_fabric'; nt = f.node_tree
     pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
     col = pb.inputs['Base Color'].links[0].from_socket
-    mix = nt.nodes.new('ShaderNodeMix'); mix.data_type = 'RGBA'; mix.inputs['Factor'].default_value = 0.8
+    mix = nt.nodes.new('ShaderNodeMix'); mix.data_type = 'RGBA'; mix.inputs['Factor'].default_value = 0.95
     nt.links.new(col, mix.inputs[6]); mix.inputs[7].default_value = (0.022, 0.022, 0.024, 1)
     tc = nt.nodes.new('ShaderNodeTexCoord'); wave = nt.nodes.new('ShaderNodeTexWave')
     wave.bands_direction = 'Z'; wave.inputs['Scale'].default_value = 60.0; wave.inputs['Distortion'].default_value = 0.0
