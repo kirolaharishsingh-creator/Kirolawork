@@ -268,7 +268,16 @@ if PROJBACK:
             coef = np.linalg.lstsq(B[keep], v[sel, 0][keep], rcond=None)[0]
         v[sel, 0] = basis(yy[sel], zz[sel]) @ coef
         if is_front: front_coef = coef
+        else: back_coef = coef
     me.vertices.foreach_set('co', v.reshape(-1)); me.update()
+    ztop = float(os.environ.get('FIN_Z', 0.383))
+    bm = bmesh.new(); bm.from_mesh(me)
+    fin = [f for f in bm.faces if f.calc_center_median().z > ztop and abs(f.calc_center_median().y) < 0.09]
+    bmesh.ops.delete(bm, geom=fin, context='FACES')
+    bmesh.ops.delete(bm, geom=[vv for vv in bm.verts if not vv.link_faces], context='VERTS')
+    hole = bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary], sides=0)['faces']
+    for f in bmesh.ops.triangulate(bm, faces=hole)['faces']: f.material_index = 1
+    bm.to_mesh(me); bm.free(); me.update(); print('lock fin trimmed:', len(fin), 'faces', flush=True)
     v = np.zeros(len(me.vertices) * 3); me.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
     y0, y1 = np.percentile(v[:, 1], [0.5, 99.5]); z0, z1 = np.percentile(v[:, 2], [0.5, 99.5])
     def panel_box(img):
@@ -304,20 +313,23 @@ if PROJBACK:
     nt.links.new(br.outputs[0], pb.inputs['Base Color'])
     me.materials.clear(); me.materials.append(pm); me.materials.append(cap_mat)
     fabric = pm
-    # backing sheet of the same fabric 2 mm behind the front surface, so the model's pin-holes never show through
+    # clean fabric sheets just outside the holed front and back surfaces, so the model's pin-holes never show
     NY, NZ = 140, 120; gy = np.linspace(-0.138, 0.138, NY); gz = np.linspace(0.125, 0.355, NZ)
-    GY, GZ = np.meshgrid(gy, gz); GX = basis(GY.ravel(), GZ.ravel()) @ front_coef + float(os.environ.get('SHEET_OFF', 0.0012))   # clean fabric sheet just in front of the holed surface
-    gv = np.c_[GX, GY.ravel(), GZ.ravel()]
-    q = np.arange(NY * NZ).reshape(NZ, NY); quads = np.c_[q[:-1, :-1].ravel(), q[:-1, 1:].ravel(), q[1:, 1:].ravel(), q[1:, :-1].ravel()]
-    bk = bpy.data.meshes.new('backrest_backing'); bk.from_pydata(gv.tolist(), [], quads.tolist())
-    for name, (u0, u1, w0, w1), mirror in (('front_uv', boxes[0], False), ('back_uv', boxes[1], True)):
-        lay = bk.uv_layers.new(name=name); li = np.zeros(len(bk.loops), np.int32); bk.loops.foreach_get('vertex_index', li)
-        ss = np.clip((gv[li, 1] - y0) / (y1 - y0), 0, 1); ss = 1 - ss if mirror else ss
-        tt = np.clip((gv[li, 2] - z0) / (z1 - z0), 0, 1)
-        lay.data.foreach_set('uv', np.c_[u0 + ss * (u1 - u0), w0 + tt * (w1 - w0)].astype(np.float32).reshape(-1))
-    bk.materials.append(pm); bk.update()
-    bko = bpy.data.objects.new('backrest_backing', bk); sc_ = bpy.context.scene; sc_.collection.objects.link(bko)
-    bko.parent = ob                                  # travels with the backrest
+    GY, GZ = np.meshgrid(gy, gz); q = np.arange(NY * NZ).reshape(NZ, NY)
+    quads = np.c_[q[:-1, :-1].ravel(), q[:-1, 1:].ravel(), q[1:, 1:].ravel(), q[1:, :-1].ravel()]
+    off = float(os.environ.get('SHEET_OFF', 0.0012))
+    for side, coef, sgn in (('front', front_coef, 1), ('back', back_coef, -1)):
+        gv = np.c_[basis(GY.ravel(), GZ.ravel()) @ coef + sgn * off, GY.ravel(), GZ.ravel()]
+        fq = quads if sgn > 0 else quads[:, ::-1]          # face normals point outwards on each side
+        bk = bpy.data.meshes.new('backrest_sheet_' + side); bk.from_pydata(gv.tolist(), [], fq.tolist())
+        li = np.zeros(len(bk.loops), np.int32); bk.loops.foreach_get('vertex_index', li)
+        for name, (u0, u1, w0, w1), mirror in (('front_uv', boxes[0], False), ('back_uv', boxes[1], True)):
+            ss = np.clip((gv[li, 1] - y0) / (y1 - y0), 0, 1); ss = 1 - ss if mirror else ss
+            tt = np.clip((gv[li, 2] - z0) / (z1 - z0), 0, 1)
+            bk.uv_layers.new(name=name).data.foreach_set('uv', np.c_[u0 + ss * (u1 - u0), w0 + tt * (w1 - w0)].astype(np.float32).reshape(-1))
+        bk.materials.append(pm); bk.update()
+        bko = bpy.data.objects.new('backrest_sheet_' + side, bk); bpy.context.scene.collection.objects.link(bko)
+        bko.parent = ob                                  # travels with the backrest
     print('backrest re-skinned from photos', boxes, flush=True)
 
 NEWBACK = os.environ.get('NEWBACK')
