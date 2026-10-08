@@ -176,6 +176,48 @@ for g, ids in GROUPS.items():
     bpy.context.view_layer.objects.active = obs[0]
     if len(obs) > 1: bpy.ops.object.join()
     obs[0].name = g
+# ---- spine frame: Tripo built it from pieces that meet in a visible step on both arms (about 54 cm up).
+# Rebuild it as one seamless surface (voxel remesh), plain black plastic, with the real chair's single
+# chrome ring where the Y meets the lower bracket.
+fr = bpy.data.objects['frame']
+if os.environ.get('SPINE_REMESH', '1') == '1':
+    # morphological closing: grow the surface, fuse it into one volume, shrink it back; gaps narrower than
+    # twice the grow distance (the cut between the arm pieces) close up, the overall shape stays
+    GROW = float(os.environ.get('GROW', 0.003))
+    bpy.context.view_layer.objects.active = fr
+    for step in ('remesh', 'grow', 'remesh', 'shrink', 'smooth'):          # first remesh: one closed surface with outward normals
+        if step in ('grow', 'shrink'):
+            md = fr.modifiers.new(step, 'DISPLACE'); md.mid_level = 0.0; md.strength = GROW if step == 'grow' else -GROW; md.direction = 'NORMAL'
+        elif step == 'remesh':
+            md = fr.modifiers.new(step, 'REMESH'); md.mode = 'VOXEL'; md.voxel_size = float(os.environ.get('VOXEL', 0.0012))
+        else:
+            md = fr.modifiers.new(step, 'CORRECTIVE_SMOOTH'); md.iterations = 6; md.use_only_smooth = True
+        if step == 'shrink':
+            fr.data.polygons.foreach_set('use_smooth', np.ones(len(fr.data.polygons), bool)); fr.data.update()
+        bpy.ops.object.modifier_apply(modifier=step)
+    # fill the groove where the arm pieces met: smooth only the vertices in that band
+    z0b, z1b = (float(x) for x in os.environ.get('GROOVE', '0.528,0.562').split(','))
+    bm = bmesh.new(); bm.from_mesh(fr.data)
+    band = [v for v in bm.verts if z0b < v.co.z < z1b]
+    for _ in range(int(os.environ.get('GROOVE_IT', 12))):
+        bmesh.ops.smooth_vert(bm, verts=band, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    bm.to_mesh(fr.data); bm.free(); fr.data.update()
+    print('groove band smoothed:', len(band), 'vertices')
+    fr.data.materials.clear(); fr.data.materials.append(plast)
+    chrome_ring = bpy.data.materials.get('chrome')
+    if chrome_ring is None:
+        chrome_ring = bpy.data.materials.new('chrome'); chrome_ring.use_nodes = True; cb = chrome_ring.node_tree.nodes['Principled BSDF']
+        cb.inputs['Base Color'].default_value = (0.86, 0.86, 0.88, 1); cb.inputs['Metallic'].default_value = 1.0; cb.inputs['Roughness'].default_value = 0.14
+    fr.data.materials.append(chrome_ring)
+    zr, rh = float(os.environ.get('RING_Z', 0.4555)), float(os.environ.get('RING_H', 0.0035))
+    bm = bmesh.new(); bm.from_mesh(fr.data)                 # crisp ring edges: cut the surface along both rims
+    for zc in (zr - rh, zr + rh):
+        bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces), plane_co=(0, 0, zc), plane_no=(0, 0, 1))
+    bm.to_mesh(fr.data); bm.free(); fr.data.update()
+    c = face_centres(fr); ring = np.abs(c[:, 2] - zr) < rh
+    mi = np.zeros(len(c), np.int32); mi[ring] = 1; fr.data.polygons.foreach_set('material_index', mi)
+    fr.data.polygons.foreach_set('use_smooth', np.ones(len(c), bool)); fr.data.update()
+    print('spine rebuilt seamless:', len(c), 'faces; chrome ring faces', int(ring.sum()))
 print('objects:', sorted(o.name for o in bpy.data.objects if o.type == 'MESH'))
 bpy.ops.file.pack_all(); bpy.ops.wm.save_as_mainfile(filepath=OUT)
 print('wrote', OUT)
