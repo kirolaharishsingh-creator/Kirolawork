@@ -190,6 +190,21 @@ if MODE == 'parts':
     sys.exit()
 
 for _n in filter(None, os.environ.get('HIDE', '').split(',')): objs[_n].hide_render = True    # debugging aid
+if os.environ.get('RAYPIX'):             # debugging aid: which part / model point sits at (or around) these pixels
+    pose(int(os.environ.get('FRAMES', '0').split(',')[0])); dg = bpy.context.evaluated_depsgraph_get()
+    fr_ = [camo.matrix_world @ c for c in cam.view_frame(scene=sc)]       # corners: tr, br, bl, tl
+    Rinv = R.inverted()
+    for xy in os.environ['RAYPIX'].split(';'):
+        px, py = (float(t) for t in xy.split(','))
+        u, v = px / W, py / H
+        top = fr_[3].lerp(fr_[0], u); bot = fr_[2].lerp(fr_[1], u); pt = top.lerp(bot, v)
+        d = (pt - camo.matrix_world.translation).normalized()
+        hit, loc, nrm, idx, ob, _ = sc.ray_cast(dg, camo.matrix_world.translation, d)
+        if hit:
+            lp = ob.matrix_world.inverted() @ loc; lp = lp + mathutils.Vector((hub[0], hub[1], 0)); mp = Rinv @ lp
+            print('RAY', xy, ob.name, 'model', tuple(round(c, 4) for c in mp))
+        else: print('RAY', xy, 'miss')
+    sys.exit()
 frames = [int(f) for f in os.environ.get('FRAMES', '0,30,57').split(',')] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1)
 os.makedirs('frames', exist_ok=True)
 for f in frames:

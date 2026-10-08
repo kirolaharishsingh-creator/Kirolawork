@@ -27,7 +27,25 @@ def neighbour_colour(rgb, a, r=6):
     w = np.asarray(wa, np.float32)[..., None] / 255
     return np.where(w > 1e-3, np.asarray(pm, np.float32) / 255 / np.maximum(w, 1e-3), FILL)
 
+def fill_pinholes(rgba):
+    # small see-through specks fully enclosed by the chair (open slots Tripo left in the rims) take the colour
+    # around them; real openings are far larger, and the gaps between flying parts are not enclosed
+    from scipy import ndimage
+    h, w = rgba.shape[:2]; a = rgba[..., 3]
+    hole = ndimage.binary_fill_holes(a > 128) & (a <= 128)
+    lab, n = ndimage.label(hole)
+    if not n: return rgba
+    size = ndimage.sum(hole, lab, index=np.arange(1, n + 1)); small = np.zeros(n + 1, bool)
+    small[1:] = size < float(os.environ.get('PINHOLE_FRAC', 0.0002)) * w * h
+    m = small[lab]
+    if not m.any(): return rgba
+    out = rgba.astype(np.float32) / 255
+    fill = neighbour_colour(out[..., :3], out[..., 3:], r=4)
+    out[m, :3] = fill[m]; out[m, 3] = 1.0
+    return (out * 255).astype(np.uint8)
+
 def over(rgba, bg):
+    if os.environ.get('PINHOLES', '1') == '1': rgba = fill_pinholes(rgba)
     im = rgba.astype(np.float32) / 255; a = im[..., 3:]
     # CLOSE=0 for models without pin-holes (model 8): the closing would bridge small gaps between parts with grey
     if os.environ.get('CLOSE', '1') == '0': return (np.clip(im[..., :3] * a + bg * (1 - a), 0, 1) * 255).astype(np.uint8)

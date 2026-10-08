@@ -8,7 +8,7 @@
 #   - clean materials in the real chair's true black; chrome base legs with a black hub; black rubber wheels
 #   - parts renamed to anim3.py's names
 # Model axes (as exported by Tripo): z up, chair front towards -y, x across.
-import bpy, bmesh, sys, os, numpy as np
+import bpy, bmesh, sys, os, mathutils, numpy as np
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
@@ -170,6 +170,103 @@ for i in (0, 1, 2):
         if len(x) < float(os.environ.get('CRUMB', 0.005)) * big: crumbs[x] = True
     delete_faces(o, crumbs); print('part', i, 'crumbs removed:', int(crumbs.sum()), 'faces')
 
+# ---- thin rods: Tripo hung thin rods off the backrest's bottom corners and the lumbar's top corners (not on the
+# real chair). Seen from the front they are a few mm wide: a morphological opening of the part's front outline
+# removes them, and faces outside the opened outline in that band go
+def drop_rods(o, zlo, zhi, r=float(os.environ.get('ROD_R', 0.0025))):
+    v = verts(o); n, ij = mask2d(v, ST); m = np.zeros(n, bool); m[ij(v)] = True
+    m = ndimage.binary_closing(m, iterations=2)
+    op = ndimage.binary_opening(m, structure=np.ones((3, 3)), iterations=int(r / ST))
+    c = face_centres(o); band = (c[:, 2] > zlo) & (c[:, 2] < zhi); rod = band & ~op[ij(c)]
+    delete_faces(o, rod)
+    bm = bmesh.new(); bm.from_mesh(o.data); bmesh.ops.delete(bm, geom=[x for x in bm.verts if not x.link_faces], context='VERTS'); bm.to_mesh(o.data); bm.free()
+    return int(rod.sum())
+print('rods removed: backrest', drop_rods(P[0], 0.0, 0.62), 'faces, lumbar', drop_rods(P[1], 0.55, 1.0), 'faces')
+
+# the backrest's bottom-right corner also carries two short rods (1 cm) mixed in with the rim: cut that corner
+# below the rim line and cap it
+RC = [float(x) for x in os.environ.get('ROD_CORNER', '0.110,0.137,0.5915').split(',')]       # x0, x1, z below which to cut
+o = P[0]; bm = bmesh.new(); bm.from_mesh(o.data)
+bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces), plane_co=(0, 0, RC[2]), plane_no=(0, 0, 1))
+bm.faces.ensure_lookup_table()
+cut = [f for f in bm.faces if RC[0] < f.calc_center_median().x < RC[1] and f.calc_center_median().z < RC[2]]
+bmesh.ops.delete(bm, geom=cut, context='FACES'); bmesh.ops.delete(bm, geom=[x for x in bm.verts if not x.link_faces], context='VERTS')
+bm.to_mesh(o.data); bm.free(); o.data.update(); print('rod corner cut:', len(cut), 'faces')
+
+# ---- pin-holes: small open holes in the rims let the backdrop through as white specks; cap them
+def fill_small_holes(o, maxlen=float(os.environ.get('HOLE_MAX', 0.03))):
+    bm = bmesh.new(); bm.from_mesh(o.data); bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5); bm.edges.ensure_lookup_table(); seen = set(); filled = 0
+    for e in bm.edges:
+        if not e.is_boundary or e.index in seen: continue
+        loop, stack, L, pts = [], [e], 0.0, []
+        while stack:
+            x = stack.pop()
+            if x.index in seen: continue
+            seen.add(x.index); loop.append(x); L += x.calc_length(); pts += [tuple(vv.co) for vv in x.verts]
+            for vv in x.verts:
+                for y in vv.link_edges:
+                    if y.is_boundary and y.index not in seen: stack.append(y)
+        # small holes, and the long but narrow slivers left open along the panel/rim seam
+        ext = np.sort(np.ptp(np.array(pts), 0))
+        if L < maxlen or ext[1] < float(os.environ.get('SLIVER', 0.045)):
+            f = bmesh.ops.holes_fill(bm, edges=loop, sides=0)['faces']
+            if f: filled += len(bmesh.ops.triangulate(bm, faces=f, quad_method='BEAUTY', ngon_method='BEAUTY')['faces'])
+    bm.to_mesh(o.data); bm.free(); o.data.update(); return filled
+def zip_seams(o, dist=float(os.environ.get('ZIP', 0.004))):
+    # weld the open edges on both sides of a seam gap together (only vertices on open edges move)
+    bm = bmesh.new(); bm.from_mesh(o.data); bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bv = [v for v in bm.verts if any(e.is_boundary for e in v.link_edges)]; n0 = len(bv)
+    bmesh.ops.remove_doubles(bm, verts=bv, dist=dist)
+    bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=1e-6)
+    bm.to_mesh(o.data); bm.free(); o.data.update(); return n0
+for i in ((0, 1, 2) if os.environ.get('ZIP_SEAMS', '0') == '1' else ()):  # off: did not close the slots
+    print('part', i, 'seam zipped:', zip_seams(P[i]), 'open-edge vertices')
+for i in (0, 1, 2, 80):
+    print('part', i, 'pin-holes capped with', fill_small_holes(P[i]), 'faces')
+
+# slots: narrow through-slots in the rims (where a spine bracket tab used to sit) show the backdrop straight
+# through. Each remaining open edge chain that is thin in one direction gets a small black block filling it
+def plug_slots(o, thin=float(os.environ.get('SLOT_THIN', 0.007)), big=float(os.environ.get('SLOT_MAX', 0.1))):
+    bm = bmesh.new(); bm.from_mesh(o.data); bm.edges.ensure_lookup_table(); seen = set(); boxes = []
+    for e in bm.edges:
+        if not e.is_boundary or e.index in seen: continue
+        stack, pts = [e], []
+        while stack:
+            x = stack.pop()
+            if x.index in seen: continue
+            seen.add(x.index); pts += [tuple(vv.co) for vv in x.verts]
+            for vv in x.verts:
+                for y in vv.link_edges:
+                    if y.is_boundary and y.index not in seen: stack.append(y)
+        p = np.array(pts); lo, hi = p.min(0), p.max(0); ext = hi - lo
+        if ext.min() < thin and ext.max() < big and ext.max() > 0.004: boxes.append((lo, hi))
+    for lo, hi in boxes:
+        pad = 0.0008; c = (lo + hi) / 2; sz = hi - lo + 2 * pad
+        r = bmesh.ops.create_cube(bm, size=1.0)
+        for vv in r['verts']: vv.co = mathutils.Vector(c) + mathutils.Vector((vv.co.x * sz[0], vv.co.y * sz[1], vv.co.z * sz[2]))
+        for f in {f for vv in r['verts'] for f in vv.link_faces}: f.material_index = 0
+    bm.to_mesh(o.data); bm.free(); o.data.update(); return len(boxes)
+for i in ((0, 1, 2) if os.environ.get('PLUGS', '0') == '1' else ()):     # off: blocks showed on the rims
+    print('part', i, 'slots plugged:', plug_slots(P[i]))
+
+# seam gaps: where the closed panel meets the original rim, slivers of backdrop still show through. With the spine
+# split off, backrest and lumbar are compact shells: seal each one (fine voxel remesh + a 1 mm closing) and carry the
+# panel/rim material split over from the original surface
+def seal(o, grow=float(os.environ.get('SEAL_GROW', 0.0012)), vox=float(os.environ.get('SEAL_VOX', 0.0008))):
+    mi = np.zeros(len(o.data.polygons), np.int32); o.data.polygons.foreach_get('material_index', mi); c0 = face_centres(o)
+    for step in ('remesh', 'grow', 'remesh', 'shrink', 'smooth'):
+        if step in ('grow', 'shrink'):
+            md = o.modifiers.new(step, 'DISPLACE'); md.mid_level = 0.0; md.strength = grow if step == 'grow' else -grow; md.direction = 'NORMAL'
+        elif step == 'remesh':
+            md = o.modifiers.new(step, 'REMESH'); md.mode = 'VOXEL'; md.voxel_size = vox
+        else:
+            md = o.modifiers.new(step, 'CORRECTIVE_SMOOTH'); md.iterations = 4; md.use_only_smooth = True
+        apply(o, md)
+    _, k = cKDTree(c0).query(face_centres(o)); o.data.polygons.foreach_set('material_index', mi[k]); o.data.update()
+    return len(o.data.polygons)
+for i in ((0, 1) if os.environ.get('SEAL', '0') == '1' else ()):     # off: Tripo's surface is not watertight enough
+    print('part', i, 'sealed:', seal(P[i]), 'faces')
+
 # ---- materials: Tripo's maps carry painted shadows, smudges and a blotchy normal map; everything gets a clean
 # material in the real chair's colours (calibrated against the real photos with anim3's LIGHT=0.22)
 def mat(name, colour, rough, spec=0.35, sheen=0.0, metal=0.0):
@@ -219,6 +316,15 @@ for i, rest in ((0, plastic), (1, plastic), (2, rimf)):
     o.data.materials.clear(); o.data.materials.append(rest); o.data.materials.append(fab)
     o.data.polygons.foreach_set('material_index', (mi == k).astype(np.int32)); mesh_uv(o); o.data.update()
 for i in (80, 12, 14, 7, 13, 17): set_all(P[i], plastic)
+# the real chair's chrome band round the spine where the V meets the lower bracket (Tripo painted it silver here)
+RZ0, RZ1 = (float(x) for x in os.environ.get('RING', '0.4705,0.4762').split(','))
+fr = P[80]; bm = bmesh.new(); bm.from_mesh(fr.data)
+for zc in (RZ0, RZ1):
+    bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces), plane_co=(0, 0, zc), plane_no=(0, 0, 1))
+bm.to_mesh(fr.data); bm.free(); fr.data.update(); fr.data.materials.append(chrome)
+c = face_centres(fr); ring = (c[:, 2] > RZ0) & (c[:, 2] < RZ1)
+fr.data.polygons.foreach_set('material_index', ring.astype(np.int32)); fr.data.update()
+print('chrome band on the spine:', int(ring.sum()), 'faces')
 set_all(P[3], seat)
 for i in GROUPS['wheels']: set_all(P[i], rubber)
 for i in (5, 6):                              # armrests: soft-touch pad on top
