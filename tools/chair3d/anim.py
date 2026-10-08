@@ -100,9 +100,41 @@ for p, name in enumerate(PART_NAMES):
     m2.polygons.add(len(sel)); m2.polygons.foreach_set('loop_start', (np.arange(len(sel)) * 3).astype(np.int32))
     m2.uv_layers.new(); m2.uv_layers[0].data.foreach_set('uv', uv[sel].reshape(-1))
     m2.update(); m2.shade_smooth(); m2.materials.append(mat); m2.materials.append(cap_mat)
-    if os.environ.get('CAPS', '1') == '1': cap_holes(m2)
     o = bpy.data.objects.new(name, m2); bpy.context.scene.collection.objects.link(o); objs[name] = o
 bpy.data.objects.remove(src)
+
+def plane_split(a, b, z, region):
+    # re-divide parts a (above) and b (below) along the flat plane at height z, inside region(x, y):
+    # a clean straight cut instead of the AI model's ragged patchwork seam
+    bm = bmesh.new(); bm.from_mesh(objs[a].data); na = len(bm.faces)
+    own = bm.faces.layers.int.new('own')
+    bm.from_mesh(objs[b].data); bm.faces.ensure_lookup_table()
+    for i, f in enumerate(bm.faces): f[own] = 0 if i < na else 1
+    geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
+    bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(0, 0, z), plane_no=(0, 0, 1))
+    for f in bm.faces:
+        c = f.calc_center_median()
+        if region(c.x, c.y): f[own] = 0 if c.z > z else 1
+    for name, keep in ((a, 0), (b, 1)):
+        bm2 = bm.copy(); o2 = bm2.faces.layers.int['own']
+        bmesh.ops.delete(bm2, geom=[f for f in bm2.faces if f[o2] != keep], context='FACES')
+        bmesh.ops.delete(bm2, geom=[v for v in bm2.verts if not v.link_faces], context='VERTS')
+        bm2.to_mesh(objs[name].data); bm2.free(); objs[name].data.update()
+    bm.free()
+    print('split', a, b, z, flush=True)
+
+HUBXY = (0.01, 0.0)
+near_hub = lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.07
+if os.environ.get('PLANES', '1') == '1':
+    plane_split('seat', 'mechanism', -0.168, lambda x, y: x > -0.17)
+    plane_split('mechanism', 'gas_lift', -0.255, near_hub)
+    plane_split('gas_lift', 'base', -0.345, near_hub)
+    for i in range(5):
+        o = objs['wheel%d' % i]; v = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
+        wx, wy = v[:, 0].mean(), v[:, 1].mean()
+        plane_split('base', 'wheel%d' % i, -0.418, lambda x, y, wx=wx, wy=wy: math.hypot(x - wx, y - wy) < 0.05)
+if os.environ.get('CAPS', '1') == '1':
+    for o in objs.values(): cap_holes(o.data)
 print('parts', sorted(objs), flush=True)
 
 # the AI texture reads mid-grey; darken it back to the real black mesh/plastic
@@ -133,7 +165,7 @@ chrome = chrome_src; chrome.name = 'chrome'
 bsdf = [n for n in chrome.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'][0]
 for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].links) + list(bsdf.inputs['Base Color'].links):
     chrome.node_tree.links.remove(l)
-bsdf.inputs['Base Color'].default_value = (0.62, 0.62, 0.65, 1)
+bsdf.inputs['Base Color'].default_value = (0.5, 0.5, 0.53, 1)
 bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.14
 for n in ('base', 'gas_lift'):
     objs[n].data.materials[0] = chrome
@@ -186,7 +218,7 @@ bg = world.node_tree.nodes['Background']; bg.inputs[1].default_value = 0.45
 wn, wl = world.node_tree.nodes, world.node_tree.links
 tc = wn.new('ShaderNodeTexCoord'); sep = wn.new('ShaderNodeSeparateXYZ'); ramp = wn.new('ShaderNodeValToRGB')
 wl.new(tc.outputs['Generated'], sep.inputs[0]); wl.new(sep.outputs['Z'], ramp.inputs['Fac'])
-ramp.color_ramp.elements[0].position = 0.30; ramp.color_ramp.elements[0].color = (0.04, 0.04, 0.045, 1)
+ramp.color_ramp.elements[0].position = 0.42; ramp.color_ramp.elements[0].color = (0.04, 0.04, 0.045, 1)
 ramp.color_ramp.elements[1].position = 0.75; ramp.color_ramp.elements[1].color = (0.95, 0.95, 0.97, 1)
 wl.new(ramp.outputs['Color'], bg.inputs[0])
 
@@ -219,7 +251,7 @@ def pose(t):
     camera_at(t)
 
 import os
-frames = [20, 60, 92] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
+frames = [60] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
     sc.render.filepath = f'/home/user/frames/{f:04d}.png'; sc.render.image_settings.file_format = 'PNG'
