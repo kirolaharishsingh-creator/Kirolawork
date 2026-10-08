@@ -173,6 +173,11 @@ if os.environ.get('PLANES', '1') == '1':
         o = objs['wheel%d' % i]; v = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
         wx, wy = v[:, 0].mean(), v[:, 1].mean()
         plane_split('base', 'wheel%d' % i, -0.418, lambda x, y, wx=wx, wy=wy: math.hypot(x - wx, y - wy) < 0.05)
+# PART_TOPCUT='seat:-0.078,...': drop anything a part has above that height (stray slivers), before capping
+for spec in filter(None, os.environ.get('PART_TOPCUT', '').split(',')):
+    pn, zc = spec.split(':'); bm = bmesh.new(); bm.from_mesh(objs[pn].data)
+    bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces), plane_co=(0, 0, float(zc)), plane_no=(0, 0, 1), clear_outer=True)
+    bm.to_mesh(objs[pn].data); bm.free(); objs[pn].data.update(); print('top cut', pn, zc, flush=True)
 if os.environ.get('CAPS', '1') == '1':
     for o in objs.values(): cap_holes(o.data)
 print('parts', sorted(objs), flush=True)
@@ -371,6 +376,12 @@ if PROJBACK and os.environ.get('LUMBAR_SKIN') == '1':
             bk.uv_layers.new(name=name).data.foreach_set('uv', np.c_[u0 + ss * (u1 - u0), w0 + tt * (w1 - w0)].astype(np.float32).reshape(-1))
         bk.materials.append(pm); bk.update()
         bo = bpy.data.objects.new('lumbar_sheet_' + side, bk); bpy.context.scene.collection.objects.link(bo); bo.parent = lo
+    if os.environ.get('LUMB_TOPCUT'):
+        zc = float(os.environ['LUMB_TOPCUT']); bm = bmesh.new(); bm.from_mesh(lme)
+        bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces), plane_co=(0, 0, zc), plane_no=(0, 0, 1), clear_outer=True)
+        hole = bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary], sides=0)['faces']
+        for f in bmesh.ops.triangulate(bm, faces=hole)['faces']: f.material_index = 1
+        bm.to_mesh(lme); bm.free(); lme.update()
     print('lumbar re-skinned', flush=True)
 
 NEWBACK = os.environ.get('NEWBACK')
