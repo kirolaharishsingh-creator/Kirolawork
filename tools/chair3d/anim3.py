@@ -67,10 +67,10 @@ def add_glow(m):
     nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
     surf = out.inputs['Surface'].links[0].from_socket
     lw = nt.nodes.new('ShaderNodeLayerWeight'); lw.inputs['Blend'].default_value = 0.2
-    pw = nt.nodes.new('ShaderNodeMath'); pw.operation = 'POWER'; pw.inputs[1].default_value = 4.0
+    pw = nt.nodes.new('ShaderNodeMath'); pw.operation = 'POWER'; pw.inputs[1].default_value = float(os.environ.get('GLOW_POW', 7.0))   # thin rim only
     at = nt.nodes.new('ShaderNodeAttribute'); at.attribute_type = 'OBJECT'; at.attribute_name = 'glow'
     mu = nt.nodes.new('ShaderNodeMath'); mu.operation = 'MULTIPLY'
-    mu2 = nt.nodes.new('ShaderNodeMath'); mu2.operation = 'MULTIPLY'; mu2.inputs[1].default_value = 7.0
+    mu2 = nt.nodes.new('ShaderNodeMath'); mu2.operation = 'MULTIPLY'; mu2.inputs[1].default_value = float(os.environ.get('GLOW', 1.2))   # tuned for the photo-matched light level (LIGHT 0.22)
     em = nt.nodes.new('ShaderNodeEmission'); em.inputs['Color'].default_value = (0.82, 0.92, 1.0, 1)
     add = nt.nodes.new('ShaderNodeAddShader'); L = nt.links
     L.new(lw.outputs['Facing'], pw.inputs[0]); L.new(pw.outputs[0], mu.inputs[0]); L.new(at.outputs['Fac'], mu.inputs[1])
