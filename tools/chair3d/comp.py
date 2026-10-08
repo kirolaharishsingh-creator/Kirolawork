@@ -1,6 +1,6 @@
 # Composite the RGBA Blender frames over the light grey studio background and encode.
 # Usage: python3 comp.py frames out.mp4   |   python3 comp.py frames sheet.jpg 0,30,60,90
-import sys, glob, subprocess, numpy as np
+import sys, os, glob, subprocess, numpy as np
 from PIL import Image, ImageFilter
 
 FILL = np.array([40, 40, 42], np.float32) / 255          # fallback colour for pin-holes with no surface around them
@@ -25,6 +25,8 @@ def neighbour_colour(rgb, a, r=6):
 
 def over(rgba, bg):
     im = rgba.astype(np.float32) / 255; a = im[..., 3:]
+    # CLOSE=0 for models without pin-holes (model 8): the closing would bridge small gaps between parts with grey
+    if os.environ.get('CLOSE', '1') == '0': return (np.clip(im[..., :3] * a + bg * (1 - a), 0, 1) * 255).astype(np.uint8)
     ac = np.maximum(close_alpha(rgba[..., 3])[..., None], a)
     fill = neighbour_colour(im[..., :3], a)              # pin-holes take the fabric colour around them
     return (np.clip(im[..., :3] * a + fill * (ac - a) + bg * (1 - ac), 0, 1) * 255).astype(np.uint8)
