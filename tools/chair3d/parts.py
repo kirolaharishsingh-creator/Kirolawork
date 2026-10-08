@@ -22,7 +22,41 @@ def classify(c):
         return 'wheel'
     return 'base'
 
-def label_components(co, lab):
+def component_adjacency(co, lab, tri, r=5e-4):
+    # shells touch along texture seams: open-boundary vertices of different shells that coincide
+    from scipy.spatial import cKDTree
+    from scipy.sparse import coo_matrix
+    e = np.sort(np.concatenate([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]]), 1)
+    ue, cnt = np.unique(e, axis=0, return_counts=True)
+    bv = np.unique(ue[cnt == 1])
+    pairs = cKDTree(co[bv]).query_pairs(r, output_type='ndarray')
+    a, b = lab[bv[pairs[:, 0]]], lab[bv[pairs[:, 1]]]
+    k = a != b; n = lab.max() + 1
+    W = coo_matrix((np.ones(k.sum()), (a[k], b[k])), shape=(n, n)).tocsr()
+    return W + W.T
+
+def smooth_parts(cpart, W, cnt, rounds=4):
+    # every part must be one connected piece: stray groups of shells move to the part they are attached to
+    from scipy.sparse.csgraph import connected_components
+    cpart = cpart.copy()
+    for _ in range(rounds):
+        moved = 0
+        for p in range(len(PART_NAMES)):
+            idx = np.nonzero(cpart == p)[0]
+            if len(idx) < 2: continue
+            ng, g = connected_components(W[idx][:, idx], directed=False)
+            if ng == 1: continue
+            size = np.bincount(g, cnt[idx]); keep = np.argmax(size)
+            for gi in range(ng):
+                if gi == keep: continue
+                comps = idx[g == gi]
+                w = np.asarray(W[comps].sum(0)).ravel()
+                votes = np.bincount(cpart, w, minlength=len(PART_NAMES)); votes[p] = 0
+                if votes.max() > 0: cpart[comps] = np.argmax(votes); moved += 1
+        if not moved: break
+    return cpart
+
+def label_components(co, lab, tri=None):
     n = lab.max() + 1
     cnt = np.bincount(lab, minlength=n)
     cen = np.stack([np.bincount(lab, co[:, i], minlength=n) for i in range(3)], 1) / np.maximum(cnt, 1)[:, None]
@@ -36,4 +70,7 @@ def label_components(co, lab):
     for g, (s0, s1) in enumerate(zip(cuts, np.r_[cuts[1:], cuts[0] + len(a)])):
         for k in range(s0 + 1, s1 + 1): grp[k % len(a)] = g
     for k, idx in enumerate(o): names[wi[idx]] = 'wheel%d' % grp[k]
-    return np.array([PART_NAMES.index(nm) for nm in names])
+    cpart = np.array([PART_NAMES.index(nm) for nm in names])
+    if tri is not None:
+        cpart = smooth_parts(cpart, component_adjacency(co, lab, tri), cnt)
+    return cpart
