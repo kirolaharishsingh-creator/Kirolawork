@@ -1,6 +1,7 @@
 # Split the Tripo chair (one mesh, ~1500 loose shells) into exploded-view parts.
 # Each loose shell goes wholly to one part, chosen by its centroid (x forward, y lateral, z up, metres).
-import numpy as np
+import os, numpy as np
+ARM_Y = float(os.environ.get('ARM_Y', 0.212))     # armrest stems sit outside this |y| (wider seat on the second model)
 
 PART_NAMES = ['headrest', 'backrest', 'frame', 'lumbar', 'seat', 'arm_r', 'arm_l',
               'mechanism', 'gas_lift', 'base', 'wheel0', 'wheel1', 'wheel2', 'wheel3', 'wheel4']
@@ -9,7 +10,7 @@ HUB = np.array([0.01, 0.0])
 def classify(c):
     x, y, z = c
     if z > 0.385 or (x < -0.275 and z > 0.26): return 'headrest'
-    if z > -0.2 and (abs(y) > 0.212 or (z > -0.06 and abs(y) > 0.17 and x > -0.12)):
+    if z > -0.2 and (abs(y) > ARM_Y or (z > -0.06 and abs(y) > 0.17 and x > -0.12)):
         return 'arm_r' if y > 0 else 'arm_l'
     if z > 0.09: return 'frame' if (x < -0.215 and abs(y) < 0.13) else 'backrest'
     if z > -0.06: return 'frame' if x < -0.215 else 'lumbar'

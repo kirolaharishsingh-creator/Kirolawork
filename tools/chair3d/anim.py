@@ -159,8 +159,16 @@ if os.environ.get('PLANES', '1') == '1':
     # the chrome rod only: its wider housing stays with the base hub
     plane_split('gas_lift', 'base', float(os.environ.get('Z_GAS', -0.33)), lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045, outside_to_b=True)
     # armrests end in a clean cut where their bracket meets the seat
-    plane_split('arm_r', 'seat', -0.16, lambda x, y: y > 0.21)       # outside the cushion's edge only
-    plane_split('arm_l', 'seat', -0.16, lambda x, y: y < -0.21)
+    AY = float(os.environ.get('ARM_Y', 0.21))
+    plane_split('arm_r', 'seat', -0.16, lambda x, y: y > AY)       # outside the cushion's edge only
+    plane_split('arm_l', 'seat', -0.16, lambda x, y: y < -AY)
+    # optional clean flat joins (used for the second model)
+    if os.environ.get('HB_Z'):
+        plane_split('headrest', 'backrest', float(os.environ['HB_Z']), lambda x, y: x > -0.26 and abs(y) < 0.2)
+    if os.environ.get('BL_Z'):
+        plane_split('backrest', 'lumbar', float(os.environ['BL_Z']), lambda x, y: True)
+    if os.environ.get('FRAME_Z'):
+        plane_split('frame', 'mechanism', float(os.environ['FRAME_Z']), lambda x, y: x > -0.22)
     for i in range(5):
         o = objs['wheel%d' % i]; v = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
         wx, wy = v[:, 0].mean(), v[:, 1].mean()
@@ -331,6 +339,39 @@ if PROJBACK:
         bko = bpy.data.objects.new('backrest_sheet_' + side, bk); bpy.context.scene.collection.objects.link(bko)
         bko.parent = ob                                  # travels with the backrest
     print('backrest re-skinned from photos', boxes, flush=True)
+
+if PROJBACK and os.environ.get('LUMBAR_SKIN') == '1':
+    lo = objs['lumbar']; lme = lo.data
+    lv_ = np.zeros(len(lme.vertices) * 3); lme.vertices.foreach_get('co', lv_); lv_ = lv_.reshape(-1, 3)
+    ln_ = np.zeros(len(lme.vertices) * 3); lme.vertices.foreach_get('normal', ln_); ln_ = ln_.reshape(-1, 3)
+    LY = float(os.environ.get('LUMB_Y', 0.14)); LZ0, LZ1 = [float(t) for t in os.environ.get('LUMB_Z', '-0.085,0.075').split(',')]
+    lin = (np.abs(lv_[:, 1]) < LY) & (lv_[:, 2] > LZ0) & (lv_[:, 2] < LZ1)
+    lcoef = {}
+    for is_front, layer in ((True, ln_[:, 0] > 0), (False, ln_[:, 0] <= 0)):
+        sel = lin & layer
+        if sel.sum() < 50: continue
+        B = basis(lv_[sel, 1], lv_[sel, 2]); c_ = np.linalg.lstsq(B, lv_[sel, 0], rcond=None)[0]
+        for _ in range(3):
+            r = np.abs(B @ c_ - lv_[sel, 0]); k_ = r < np.percentile(r, 80); c_ = np.linalg.lstsq(B[k_], lv_[sel, 0][k_], rcond=None)[0]
+        lv_[sel, 0] = B @ c_; lcoef[is_front] = c_
+    lme.vertices.foreach_set('co', lv_.reshape(-1)); lme.update()
+    # the photo's mesh area only (inside its frame)
+    fi = float(os.environ.get('LUMB_CROP', 0.13))
+    crop = [(u0 + (u1 - u0) * fi, u1 - (u1 - u0) * fi, w0 + (w1 - w0) * fi, w1 - (w1 - w0) * fi) for (u0, u1, w0, w1) in boxes]
+    NY, NZ = 140, 100; gy = np.linspace(-LY, LY, NY); gz = np.linspace(LZ0, LZ1, NZ)
+    GY, GZ = np.meshgrid(gy, gz); q = np.arange(NY * NZ).reshape(NZ, NY)
+    quads = np.c_[q[:-1, :-1].ravel(), q[:-1, 1:].ravel(), q[1:, 1:].ravel(), q[1:, :-1].ravel()]
+    for side, sgn in (('front', 1), ('back', -1)):
+        if (sgn > 0) not in lcoef: continue
+        gv = np.c_[basis(GY.ravel(), GZ.ravel()) @ lcoef[sgn > 0] + sgn * 0.0012, GY.ravel(), GZ.ravel()]
+        bk = bpy.data.meshes.new('lumbar_sheet_' + side); bk.from_pydata(gv.tolist(), [], (quads if sgn > 0 else quads[:, ::-1]).tolist())
+        li = np.zeros(len(bk.loops), np.int32); bk.loops.foreach_get('vertex_index', li)
+        for name, (u0, u1, w0, w1), mirror in (('front_uv', crop[0], False), ('back_uv', crop[1], True)):
+            ss = (gv[li, 1] + LY) / (2 * LY); ss = 1 - ss if mirror else ss; tt = (gv[li, 2] - LZ0) / (LZ1 - LZ0)
+            bk.uv_layers.new(name=name).data.foreach_set('uv', np.c_[u0 + ss * (u1 - u0), w0 + tt * (w1 - w0)].astype(np.float32).reshape(-1))
+        bk.materials.append(pm); bk.update()
+        bo = bpy.data.objects.new('lumbar_sheet_' + side, bk); bpy.context.scene.collection.objects.link(bo); bo.parent = lo
+    print('lumbar re-skinned', flush=True)
 
 NEWBACK = os.environ.get('NEWBACK')
 if NEWBACK:
