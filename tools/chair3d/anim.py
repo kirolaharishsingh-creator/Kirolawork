@@ -259,7 +259,7 @@ if PROJBACK:
     inner = (np.abs(yy) < float(os.environ.get('INNER_Y', 0.14))) & (zz > 0.12) & (zz < 0.36)
     def basis(y, z):
         return np.c_[np.ones_like(y), y, z, y * y, y * z, z * z, z ** 3, y * y * z]
-    for layer in (nrm[:, 0] > 0, nrm[:, 0] <= 0):
+    for is_front, layer in ((True, nrm[:, 0] > 0), (False, nrm[:, 0] <= 0)):
         sel = inner & layer
         if sel.sum() < 50: continue
         B = basis(yy[sel], zz[sel]); coef = np.linalg.lstsq(B, v[sel, 0], rcond=None)[0]
@@ -267,6 +267,7 @@ if PROJBACK:
             r = np.abs(B @ coef - v[sel, 0]); keep = r < np.percentile(r, 80)
             coef = np.linalg.lstsq(B[keep], v[sel, 0][keep], rcond=None)[0]
         v[sel, 0] = basis(yy[sel], zz[sel]) @ coef
+        if is_front: front_coef = coef
     me.vertices.foreach_set('co', v.reshape(-1)); me.update()
     v = np.zeros(len(me.vertices) * 3); me.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
     y0, y1 = np.percentile(v[:, 1], [0.5, 99.5]); z0, z1 = np.percentile(v[:, 2], [0.5, 99.5])
@@ -275,12 +276,12 @@ if PROJBACK:
         m = px[..., :3].mean(-1) < 0.6; ys, xs = np.nonzero(m)
         return xs.min() / w, xs.max() / w, ys.min() / h, ys.max() / h      # pixel rows run bottom to top in Blender
     imgs = [bpy.data.images.load(os.path.abspath(p)) for p in PROJBACK.split(',')]
-    def inset(b, f=float(os.environ.get('INSET', 0.025))):
+    def inset(b, f=float(os.environ.get('INSET', 0.05))):
         u0, u1, w0, w1 = b; du, dw = (u1 - u0) * f, (w1 - w0) * f
         return u0 + du, u1 - du, w0 + dw, w1 - dw
     boxes = [inset(panel_box(im)) for im in imgs]
     lv = np.zeros(len(me.loops), np.int32); me.loops.foreach_get('vertex_index', lv)
-    P = v[lv]; s = (P[:, 1] - y0) / (y1 - y0); t = (P[:, 2] - z0) / (z1 - z0)
+    P = v[lv]; s = np.clip((P[:, 1] - y0) / (y1 - y0), 0, 1); t = np.clip((P[:, 2] - z0) / (z1 - z0), 0, 1)
     for name, (u0, u1, w0, w1), mirror in (('front_uv', boxes[0], False), ('back_uv', boxes[1], True)):
         lay = me.uv_layers.new(name=name)
         su = (1 - s) if mirror else s          # seen from behind, left and right swap
@@ -303,6 +304,20 @@ if PROJBACK:
     nt.links.new(br.outputs[0], pb.inputs['Base Color'])
     me.materials.clear(); me.materials.append(pm); me.materials.append(cap_mat)
     fabric = pm
+    # backing sheet of the same fabric 2 mm behind the front surface, so the model's pin-holes never show through
+    NY, NZ = 140, 120; gy = np.linspace(-0.138, 0.138, NY); gz = np.linspace(0.125, 0.355, NZ)
+    GY, GZ = np.meshgrid(gy, gz); GX = basis(GY.ravel(), GZ.ravel()) @ front_coef - 0.002
+    gv = np.c_[GX, GY.ravel(), GZ.ravel()]
+    q = np.arange(NY * NZ).reshape(NZ, NY); quads = np.c_[q[:-1, :-1].ravel(), q[:-1, 1:].ravel(), q[1:, 1:].ravel(), q[1:, :-1].ravel()]
+    bk = bpy.data.meshes.new('backrest_backing'); bk.from_pydata(gv.tolist(), [], quads.tolist())
+    for name, (u0, u1, w0, w1), mirror in (('front_uv', boxes[0], False), ('back_uv', boxes[1], True)):
+        lay = bk.uv_layers.new(name=name); li = np.zeros(len(bk.loops), np.int32); bk.loops.foreach_get('vertex_index', li)
+        ss = np.clip((gv[li, 1] - y0) / (y1 - y0), 0, 1); ss = 1 - ss if mirror else ss
+        tt = np.clip((gv[li, 2] - z0) / (z1 - z0), 0, 1)
+        lay.data.foreach_set('uv', np.c_[u0 + ss * (u1 - u0), w0 + tt * (w1 - w0)].astype(np.float32).reshape(-1))
+    bk.materials.append(pm); bk.update()
+    bko = bpy.data.objects.new('backrest_backing', bk); sc_ = bpy.context.scene; sc_.collection.objects.link(bko)
+    bko.parent = ob                                  # travels with the backrest
     print('backrest re-skinned from photos', boxes, flush=True)
 
 NEWBACK = os.environ.get('NEWBACK')
@@ -429,7 +444,9 @@ if MODE == 'parts':
     os.makedirs('parts', exist_ok=True)
     order = os.environ.get('ONLY', 'headrest,backrest,frame,lumbar,seat,arm_l,arm_r,mechanism,gas_lift,base,wheel0').split(',')
     for n in order:
-        for o in objs.values(): o.hide_render = (o is not objs[n])
+        for o in objs.values():
+            o.hide_render = (o is not objs[n])
+            for ch in o.children: ch.hide_render = o.hide_render
         v = np.zeros(len(objs[n].data.vertices) * 3); objs[n].data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
         c = mathutils.Vector(((v.min(0) + v.max(0)) / 2).tolist()); r = float(np.linalg.norm(v.max(0) - v.min(0))) / 2
         for side, azd in (('a', 228), ('b', 40)):
