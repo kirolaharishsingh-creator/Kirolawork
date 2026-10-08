@@ -34,7 +34,10 @@ FLOOR0 = -0.4904
 def smooth(u):
     u = min(max(u, 0.0), 1.0); return u * u * (3 - 2 * u)
 
+EXPLODE = os.environ.get('EXPLODE', '1') == '1'        # EXPLODE=0: plain 360 turntable of the assembled chair (USP shot)
+
 def amount(i, u):
+    if not EXPLODE: return 0.0
     a = smooth((u - (T_OUT + i * STAG)) / (T_HOLD - T_OUT - 6 * STAG))
     b = smooth((u - (T_BACK + (7 - i) * STAG)) / (T_END - T_BACK - 6 * STAG))
     return a * (1 - b)
@@ -152,7 +155,7 @@ D0, D1 = float(os.environ.get('D0', 3.1)), float(os.environ.get('D1', 7.0))
 
 def camera_at(e):
     dist = D0 + (D1 - D0) * e
-    target = mathutils.Vector((hub[0], hub[1], 0.02 - 0.04 * e))
+    target = mathutils.Vector((hub[0], hub[1], float(os.environ.get('CAM_Z', 0.02)) - 0.04 * e))
     pos = target + dist * mathutils.Vector((math.cos(EL) * math.cos(AZ), math.cos(EL) * math.sin(AZ), math.sin(EL)))
     camo.location = pos; camo.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
 
@@ -163,6 +166,7 @@ def pose(f):
         k = amount(i, u); objs[n].location = (off[0] * k, off[1] * k, off[2] * k); objs[n]['glow'] = 4 * k * (1 - k)
         objs[n]['sweep'] = -0.06 + 1.12 * k; objs[n]['ray'] = min(1.0, 8 * k * (1 - k))
     e = smooth((u - T_OUT + 0.03) / (T_HOLD - T_OUT)) * (1 - smooth((u - T_BACK) / (T_END - T_BACK + 0.03)))
+    if not EXPLODE: e = 0.0
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, u)
     camera_at(e)
     bpy.context.view_layer.update()

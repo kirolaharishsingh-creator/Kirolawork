@@ -6,6 +6,10 @@ from PIL import Image, ImageFilter
 FILL = np.array([40, 40, 42], np.float32) / 255          # fallback colour for pin-holes with no surface around them
 
 def studio_bg(w, h):
+    if os.environ.get('BG') == 'ref':                 # USP look: mid grey at the top fading to near white at the floor
+        t = np.clip(np.linspace(0, 1, h) / 0.85, 0, 1)[:, None, None] ** 0.8
+        top, bot = np.array([112, 112, 113], np.float32) / 255, np.array([238, 238, 238], np.float32) / 255
+        return np.broadcast_to(top + (bot - top) * t, (h, w, 3)).copy()
     yy, xx = np.mgrid[0:h, 0:w]
     r = np.hypot((xx - w * 0.5) / (w * 0.6), (yy - h * 0.45) / (h * 0.75))
     tone = np.array([202, 198, 194], np.float32) / 255       # timeline studio grey (RGB)
