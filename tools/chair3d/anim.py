@@ -119,7 +119,7 @@ def mesh_from_arrays(name, co_, lv_, ls_, mi_, uv_):
     m.uv_layers.new(); m.uv_layers[0].data.foreach_set('uv', uv_.reshape(-1))
     m.polygons.foreach_set('material_index', mi_); m.update(); return m
 
-def plane_split(a, b, z, region, claim_above=False):
+def plane_split(a, b, z, region, claim_above=None, outside_to_b=False):
     # re-divide parts a (above) and b (below) along the flat plane at height z, inside region(x, y):
     # a clean straight cut instead of the AI model's ragged patchwork seam
     A, B = mesh_arrays(objs[a].data), mesh_arrays(objs[b].data)
@@ -134,7 +134,8 @@ def plane_split(a, b, z, region, claim_above=False):
     for f in bm.faces:
         c = f.calc_center_median()
         if region(c.x, c.y): f.material_index = 0 if c.z > z else 1
-        elif claim_above and c.z > z: f.material_index = 0       # outside the footprint, everything above the cut belongs to a
+        elif claim_above is not None and c.z > claim_above: f.material_index = 0   # outside the footprint, high pieces belong to a
+        elif outside_to_b and f.material_index == 0: f.material_index = 1          # a keeps only what is inside the region
     for name, keep in ((a, 0), (b, 1)):
         bm2 = bm.copy()
         bmesh.ops.delete(bm2, geom=[f for f in bm2.faces if f.material_index != keep], context='FACES')
@@ -148,10 +149,13 @@ HUBXY = (0.01, 0.0)
 near_hub = lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.07
 if os.environ.get('PLANES', '1') == '1':
     # only under the mechanism's own footprint, so the seat keeps its whole underside
-    plane_split('seat', 'mechanism', -0.172, lambda x, y: -0.08 < x < 0.16 and abs(y) < 0.1, claim_above=True)
+    plane_split('seat', 'mechanism', -0.172, lambda x, y: -0.08 < x < 0.16 and abs(y) < 0.1, claim_above=-0.205)
     plane_split('mechanism', 'gas_lift', -0.255, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045)
     # the column only: the hub socket and arm roots stay with the base
-    plane_split('gas_lift', 'base', -0.36, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.035)
+    plane_split('gas_lift', 'base', -0.36, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.035, outside_to_b=True)
+    # armrests end in a clean cut where their bracket meets the seat
+    plane_split('arm_r', 'seat', -0.16, lambda x, y: y > 0.15)
+    plane_split('arm_l', 'seat', -0.16, lambda x, y: y < -0.15)
     for i in range(5):
         o = objs['wheel%d' % i]; v = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
         wx, wy = v[:, 0].mean(), v[:, 1].mean()
@@ -193,6 +197,22 @@ bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_va
 for n in ('base', 'gas_lift'):
     objs[n].data.materials[0] = chrome
 
+def fabric_material(src_mat):
+    f = src_mat.copy(); f.name = 'backrest_fabric'; nt = f.node_tree
+    pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
+    col = pb.inputs['Base Color'].links[0].from_socket
+    mix = nt.nodes.new('ShaderNodeMix'); mix.data_type = 'RGBA'; mix.inputs['Factor'].default_value = 0.8
+    nt.links.new(col, mix.inputs[6]); mix.inputs[7].default_value = (0.022, 0.022, 0.024, 1)
+    tc = nt.nodes.new('ShaderNodeTexCoord'); wave = nt.nodes.new('ShaderNodeTexWave')
+    wave.bands_direction = 'Z'; wave.inputs['Scale'].default_value = 60.0; wave.inputs['Distortion'].default_value = 0.0
+    nt.links.new(tc.outputs['Object'], wave.inputs['Vector'])
+    ramp = nt.nodes.new('ShaderNodeMapRange'); ramp.inputs['To Min'].default_value = 0.55; ramp.inputs['To Max'].default_value = 1.0
+    nt.links.new(wave.outputs['Fac'], ramp.inputs['Value'])
+    mul = nt.nodes.new('ShaderNodeMix'); mul.data_type = 'RGBA'; mul.blend_type = 'MULTIPLY'; mul.inputs['Factor'].default_value = 1.0
+    nt.links.new(mix.outputs[2], mul.inputs[6]); nt.links.new(ramp.outputs['Result'], mul.inputs[7])
+    nt.links.new(mul.outputs[2], pb.inputs['Base Color'])
+    return f
+
 def black_backfaces(m):
     # the inside of a cut opening shows the model's back faces: make them flat black so openings read as dark recesses
     nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
@@ -203,6 +223,7 @@ def black_backfaces(m):
     nt.links.new(geo.outputs['Backfacing'], mix.inputs[0]); nt.links.new(surf, mix.inputs[1]); nt.links.new(dark.outputs[0], mix.inputs[2])
     nt.links.new(mix.outputs[0], out.inputs['Surface'])
 for m in (mat, chrome): black_backfaces(m)
+fabric = fabric_material(mat); objs['backrest'].data.materials[0] = fabric
 
 def add_glow(m):
     nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
@@ -218,7 +239,7 @@ def add_glow(m):
     L.new(lw.outputs['Facing'], pw.inputs[0]); L.new(pw.outputs[0], mu.inputs[0]); L.new(at.outputs['Fac'], mu.inputs[1])
     L.new(mu.outputs[0], mu2.inputs[0]); L.new(mu2.outputs[0], em.inputs['Strength'])
     L.new(surf, add.inputs[0]); L.new(em.outputs[0], add.inputs[1]); L.new(add.outputs[0], out.inputs['Surface'])
-for m in (mat, chrome, cap_mat): add_glow(m)
+for m in (mat, chrome, cap_mat, fabric): add_glow(m)
 
 # wheel offsets: straight down plus outward from the hub
 hub = np.array([0.01, 0.0])
