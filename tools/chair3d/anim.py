@@ -43,7 +43,7 @@ mat = src.data.materials[0]
 
 # label faces by part (via loose-shell labels), then split into one object per part
 co = np.load('co.npy'); lab = np.load('lab.npy')
-vpart = label_components(co, lab)[lab]
+vpart = label_components(co, lab, np.load('tri.npy'))[lab]
 me = src.data
 nf = len(me.polygons); lst = np.zeros(nf, int); me.polygons.foreach_get('loop_start', lst)
 lv = np.zeros(len(me.loops), int); me.loops.foreach_get('vertex_index', lv)
@@ -53,6 +53,23 @@ assert (lt == 3).all(), 'expects a triangle mesh'
 li = lst[:, None] + np.arange(3)                    # loop indices of each triangle
 tri = lv[li]
 uv = np.zeros(len(me.loops) * 2, np.float32); me.uv_layers[0].data.foreach_get('uv', uv); uv = uv.reshape(-1, 2)[li]
+import bmesh
+cap_mat = bpy.data.materials.new('cap'); cap_mat.use_nodes = True
+cp = cap_mat.node_tree.nodes['Principled BSDF']; cp.inputs['Base Color'].default_value = (0.012, 0.012, 0.013, 1)
+cp.inputs['Roughness'].default_value = 0.6
+
+def cap_holes(m):
+    # weld the AI model's texture seams, then close every opening left by the cut with a matte black cap
+    bm = bmesh.new(); bm.from_mesh(m)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=2e-4)
+    edges = [e for e in bm.edges if e.is_boundary]
+    new = bmesh.ops.holes_fill(bm, edges=edges, sides=0)['faces']
+    if new:
+        tri_ = bmesh.ops.triangulate(bm, faces=new)['faces']
+        for f in tri_: f.material_index = 1; f.smooth = False
+    bm.to_mesh(m); bm.free(); m.update()
+    return len(new)
+
 objs = {}
 for p, name in enumerate(PART_NAMES):
     sel = np.nonzero(fpart == p)[0]
@@ -62,7 +79,8 @@ for p, name in enumerate(PART_NAMES):
     m2.loops.add(len(sel) * 3); m2.loops.foreach_set('vertex_index', inv.reshape(-1).astype(np.int32))
     m2.polygons.add(len(sel)); m2.polygons.foreach_set('loop_start', (np.arange(len(sel)) * 3).astype(np.int32))
     m2.uv_layers.new(); m2.uv_layers[0].data.foreach_set('uv', uv[sel].reshape(-1))
-    m2.update(); m2.shade_smooth(); m2.materials.append(mat)
+    m2.update(); m2.shade_smooth(); m2.materials.append(mat); m2.materials.append(cap_mat)
+    cap_holes(m2)
     o = bpy.data.objects.new(name, m2); bpy.context.scene.collection.objects.link(o); objs[name] = o
 bpy.data.objects.remove(src)
 print('parts', sorted(objs), flush=True)
@@ -127,10 +145,9 @@ cam = bpy.data.cameras.new('cam'); cam.lens = 50
 camo = bpy.data.objects.new('cam', cam); sc.collection.objects.link(camo); sc.camera = camo
 
 def camera_at(t):
-    k = smooth(t / 4.8)
-    az = math.radians(228 + 24 * k)                     # slow orbit around the back three-quarter
-    e = amount(3.5, t)                                  # pull back while the parts are apart
-    dist = 3.0 + 1.8 * e; el = math.radians(10)
+    az = math.radians(228 + 22 * math.sin(math.pi * t / 4.8))   # orbit out and back: last frame = first frame
+    e = smooth((t - T0) / 1.7) * (1 - smooth((t - HOLD_END) / 1.7))   # pull back gently while the parts are apart
+    dist = 3.0 + 1.1 * e; el = math.radians(10)
     target = mathutils.Vector((-0.08 - 0.08 * e, 0.0, 0.0))
     pos = target + dist * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
     camo.location = pos; camo.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
@@ -142,7 +159,7 @@ def pose(t):
     camera_at(t)
 
 import os
-frames = [0, 60] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
+frames = [0, 30, 60, 115] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
     sc.render.filepath = f'/home/user/frames/{f:04d}.png'; sc.render.image_settings.file_format = 'PNG'

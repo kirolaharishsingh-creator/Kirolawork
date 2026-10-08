@@ -17,7 +17,7 @@ def classify(c):
     if z > -0.255: return 'frame' if x < -0.12 else 'mechanism'
     r = np.hypot(x - HUB[0], y - HUB[1])
     if z > -0.345 and r < 0.06: return 'gas_lift'
-    if z > -0.255 - 0.0 and r >= 0.06: return 'mechanism'
+    if z > -0.33 and r >= 0.06: return 'mechanism'          # tilt knob and lever hanging below the plate
     if z < -0.415 and r > 0.1:
         return 'wheel'
     return 'base'
