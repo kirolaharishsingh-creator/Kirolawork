@@ -252,11 +252,22 @@ if PROJBACK:
     # keep the original backrest shape (it fits the chair), flatten the V dents in its mesh area,
     # and wrap the real fabric from the isolated photos onto it: front photo on the front, back photo on the back
     ob = objs['backrest']; me = ob.data
-    bm = bmesh.new(); bm.from_mesh(me)
-    inner = [v for v in bm.verts if abs(v.co.y) < 0.135 and 0.125 < v.co.z < 0.355]
-    for _ in range(int(os.environ.get('SMOOTH', 40))):
-        bmesh.ops.smooth_vert(bm, verts=inner, factor=0.5, use_axis_x=True, use_axis_y=False, use_axis_z=False)
-    bm.to_mesh(me); bm.free(); me.update()
+    # replace the dented mesh area with a smooth surface fitted to the panel's own curve (front and back layers separately)
+    v = np.zeros(len(me.vertices) * 3); me.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
+    nrm = np.zeros(len(me.vertices) * 3); me.vertices.foreach_get('normal', nrm); nrm = nrm.reshape(-1, 3)
+    yy, zz = v[:, 1], v[:, 2]
+    inner = (np.abs(yy) < float(os.environ.get('INNER_Y', 0.14))) & (zz > 0.12) & (zz < 0.36)
+    def basis(y, z):
+        return np.c_[np.ones_like(y), y, z, y * y, y * z, z * z, z ** 3, y * y * z]
+    for layer in (nrm[:, 0] > 0, nrm[:, 0] <= 0):
+        sel = inner & layer
+        if sel.sum() < 50: continue
+        B = basis(yy[sel], zz[sel]); coef = np.linalg.lstsq(B, v[sel, 0], rcond=None)[0]
+        for _ in range(3):                                   # refit without the dents (largest residuals)
+            r = np.abs(B @ coef - v[sel, 0]); keep = r < np.percentile(r, 80)
+            coef = np.linalg.lstsq(B[keep], v[sel, 0][keep], rcond=None)[0]
+        v[sel, 0] = basis(yy[sel], zz[sel]) @ coef
+    me.vertices.foreach_set('co', v.reshape(-1)); me.update()
     v = np.zeros(len(me.vertices) * 3); me.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
     y0, y1 = np.percentile(v[:, 1], [0.5, 99.5]); z0, z1 = np.percentile(v[:, 2], [0.5, 99.5])
     def panel_box(img):
@@ -264,7 +275,10 @@ if PROJBACK:
         m = px[..., :3].mean(-1) < 0.6; ys, xs = np.nonzero(m)
         return xs.min() / w, xs.max() / w, ys.min() / h, ys.max() / h      # pixel rows run bottom to top in Blender
     imgs = [bpy.data.images.load(os.path.abspath(p)) for p in PROJBACK.split(',')]
-    boxes = [panel_box(im) for im in imgs]
+    def inset(b, f=float(os.environ.get('INSET', 0.025))):
+        u0, u1, w0, w1 = b; du, dw = (u1 - u0) * f, (w1 - w0) * f
+        return u0 + du, u1 - du, w0 + dw, w1 - dw
+    boxes = [inset(panel_box(im)) for im in imgs]
     lv = np.zeros(len(me.loops), np.int32); me.loops.foreach_get('vertex_index', lv)
     P = v[lv]; s = (P[:, 1] - y0) / (y1 - y0); t = (P[:, 2] - z0) / (z1 - z0)
     for name, (u0, u1, w0, w1), mirror in (('front_uv', boxes[0], False), ('back_uv', boxes[1], True)):
