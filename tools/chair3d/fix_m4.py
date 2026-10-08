@@ -153,9 +153,17 @@ if HP:
 # ---- base and column: matte black plastic (Tripo baked chrome reflections into a blotchy texture)
 plast = bpy.data.materials.new('frame_plastic'); plast.use_nodes = True; pb = plast.node_tree.nodes['Principled BSDF']
 pb.inputs['Base Color'].default_value = (0.03, 0.03, 0.032, 1); pb.inputs['Roughness'].default_value = 0.55; pb.inputs['Specular IOR Level'].default_value = 0.3
-if os.environ.get('BASE', 'black') == 'black':
-    for i in (1, 90):
-        P[i].data.materials.clear(); P[i].data.materials.append(plast)
+for i in (1, 90):
+    P[i].data.materials.clear(); P[i].data.materials.append(plast)
+if os.environ.get('BASE', 'black') == 'chrome':
+    # like the real chair: polished chrome legs, black hub (and black gas-lift column)
+    chrome = bpy.data.materials.new('chrome'); chrome.use_nodes = True; cb = chrome.node_tree.nodes['Principled BSDF']
+    cb.inputs['Base Color'].default_value = (0.86, 0.86, 0.88, 1); cb.inputs['Metallic'].default_value = 1.0
+    cb.inputs['Roughness'].default_value = float(os.environ.get('CHROME_ROUGH', 0.14))
+    b = P[1]; b.data.materials.append(chrome)
+    c = face_centres(b); legs = np.hypot(c[:, 0] - ax[0], c[:, 1] - ax[1]) > float(os.environ.get('HUB_R', 0.055))
+    mi = np.zeros(len(c), np.int32); mi[legs] = 1; b.data.polygons.foreach_set('material_index', mi); b.data.update()
+    print('chrome legs:', int(legs.sum()), 'faces; hub stays black')
 
 # ---- regroup into the animation's parts
 for g, ids in GROUPS.items():

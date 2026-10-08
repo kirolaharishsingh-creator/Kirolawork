@@ -99,6 +99,13 @@ LIGHT = float(os.environ.get('LIGHT', 0.22))
 world = bpy.data.worlds.new('w'); sc.world = world; world.use_nodes = True
 bg = world.node_tree.nodes['Background']; bg.inputs[0].default_value = (0.62, 0.62, 0.64, 1); bg.inputs[1].default_value = 0.45 * LIGHT
 
+# chrome needs something bright to reflect: glossy rays see the full-strength studio surround
+_wn, _wl = world.node_tree.nodes, world.node_tree.links
+_out = [n for n in _wn if n.type == 'OUTPUT_WORLD'][0]
+_bg2 = _wn.new('ShaderNodeBackground'); _bg2.inputs[0].default_value = (0.62, 0.62, 0.64, 1); _bg2.inputs[1].default_value = float(os.environ.get('CHROME_ENV', 0.5))
+_lp = _wn.new('ShaderNodeLightPath'); _mx = _wn.new('ShaderNodeMixShader')
+_wl.new(_lp.outputs['Is Glossy Ray'], _mx.inputs[0]); _wl.new(bg.outputs[0], _mx.inputs[1]); _wl.new(_bg2.outputs[0], _mx.inputs[2]); _wl.new(_mx.outputs[0], _out.inputs['Surface'])
+
 def area(name, loc, energy, size):
     L = bpy.data.lights.new(name, 'AREA'); L.energy = energy * LIGHT; L.size = size
     o = bpy.data.objects.new(name, L); sc.collection.objects.link(o); o.location = loc
