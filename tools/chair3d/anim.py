@@ -57,7 +57,7 @@ uv = np.zeros(len(me.loops) * 2, np.float32); me.uv_layers[0].data.foreach_get('
 import bmesh
 cap_mat = bpy.data.materials.new('cap'); cap_mat.use_nodes = True
 cp = cap_mat.node_tree.nodes['Principled BSDF']; cp.inputs['Base Color'].default_value = (0.012, 0.012, 0.013, 1)
-cp.inputs['Roughness'].default_value = 0.6
+cp.inputs['Roughness'].default_value = 1.0; cp.inputs['Specular IOR Level'].default_value = 0.0   # no sheen: caps read as dark openings
 
 def cap_holes(m):
     # weld the AI model's texture seams, then close every opening left by the cut with a matte black cap
@@ -68,6 +68,7 @@ def cap_holes(m):
     if new:
         tri_ = bmesh.ops.triangulate(bm, faces=new)['faces']
         for f in tri_: f.material_index = 1; f.smooth = False
+        bmesh.ops.recalc_face_normals(bm, faces=tri_)
     bm.to_mesh(m); bm.free(); m.update()
     return len(new)
 
