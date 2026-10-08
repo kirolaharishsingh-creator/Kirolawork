@@ -70,11 +70,16 @@ print('parts', sorted(objs), flush=True)
 # the AI texture reads mid-grey; darken it back to the real black mesh/plastic
 nt = mat.node_tree; pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
 if pb.inputs['Base Color'].links:
-    lk = pb.inputs['Base Color'].links[0]; g = nt.nodes.new('ShaderNodeGamma'); g.inputs[1].default_value = 1.8
+    lk = pb.inputs['Base Color'].links[0]; g = nt.nodes.new('ShaderNodeGamma'); g.inputs[1].default_value = 2.2
     nt.links.new(lk.from_socket, g.inputs[0]); nt.links.new(g.outputs[0], pb.inputs['Base Color'])
+# black plastic/fabric: no metal, soft low sheen (the ORM map's metallic made it read grey)
+chrome_src = mat.copy()
+for l in list(pb.inputs['Metallic'].links): nt.links.remove(l)
+pb.inputs['Metallic'].default_value = 0.0
+pb.inputs['Specular IOR Level'].default_value = 0.3
 
 # polished chrome for the base and gas lift (keeps the texture's dark details)
-chrome = mat.copy(); chrome.name = 'chrome'
+chrome = chrome_src; chrome.name = 'chrome'
 bsdf = [n for n in chrome.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'][0]
 for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].links): chrome.node_tree.links.remove(l)
 bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.12
@@ -127,7 +132,7 @@ def pose(t):
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, t)
     camera_at(t)
 
-frames = [0, 40, 60, 95] if MODE == 'test' else range(N + 1)
+frames = [0, 60] if MODE == 'test' else range(N + 1)
 import os; os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
