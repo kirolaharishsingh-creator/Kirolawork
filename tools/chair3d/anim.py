@@ -7,7 +7,8 @@ from parts import label_components, PART_NAMES
 
 MODE = sys.argv[-1]
 FPS, N = 24, 115                  # 4.8 s
-W, H = 960, 540
+import os
+W = int(os.environ.get('RES', 960)); H = W * 9 // 16
 SAMPLES = 16
 
 # part -> (stagger order, offset in metres: x forward, y lateral, z up)
@@ -101,10 +102,26 @@ chrome = chrome_src; chrome.name = 'chrome'
 bsdf = [n for n in chrome.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'][0]
 for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].links) + list(bsdf.inputs['Base Color'].links):
     chrome.node_tree.links.remove(l)
-bsdf.inputs['Base Color'].default_value = (0.8, 0.8, 0.82, 1)
-bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.08
+bsdf.inputs['Base Color'].default_value = (0.62, 0.62, 0.65, 1)
+bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.14
 for n in ('base', 'gas_lift'):
     objs[n].data.materials[0] = chrome
+
+def add_glow(m):
+    nt = m.node_tree; out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
+    surf = out.inputs['Surface'].links[0].from_socket
+    lw = nt.nodes.new('ShaderNodeLayerWeight'); lw.inputs['Blend'].default_value = 0.35
+    pw = nt.nodes.new('ShaderNodeMath'); pw.operation = 'POWER'; pw.inputs[1].default_value = 2.0
+    at = nt.nodes.new('ShaderNodeAttribute'); at.attribute_type = 'OBJECT'; at.attribute_name = 'glow'
+    mu = nt.nodes.new('ShaderNodeMath'); mu.operation = 'MULTIPLY'
+    mu2 = nt.nodes.new('ShaderNodeMath'); mu2.operation = 'MULTIPLY'; mu2.inputs[1].default_value = 9.0
+    em = nt.nodes.new('ShaderNodeEmission'); em.inputs['Color'].default_value = (0.82, 0.92, 1.0, 1)
+    add = nt.nodes.new('ShaderNodeAddShader')
+    L = nt.links
+    L.new(lw.outputs['Facing'], pw.inputs[0]); L.new(pw.outputs[0], mu.inputs[0]); L.new(at.outputs['Fac'], mu.inputs[1])
+    L.new(mu.outputs[0], mu2.inputs[0]); L.new(mu2.outputs[0], em.inputs['Strength'])
+    L.new(surf, add.inputs[0]); L.new(em.outputs[0], add.inputs[1]); L.new(add.outputs[0], out.inputs['Surface'])
+for m in (mat, chrome, cap_mat): add_glow(m)
 
 # wheel offsets: straight down plus outward from the hub
 hub = np.array([0.01, 0.0])
@@ -155,11 +172,12 @@ def camera_at(t):
 def pose(t):
     for n, (i, off) in MOVES.items():
         k = amount(i, t); objs[n].location = (off[0] * k, off[1] * k, off[2] * k)
+        objs[n]['glow'] = 4 * k * (1 - k)                 # flares while the part breaks away and while it locks back in
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, t)
     camera_at(t)
 
 import os
-frames = [0, 30, 60, 115] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
+frames = [14, 30, 60, 84] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
     sc.render.filepath = f'/home/user/frames/{f:04d}.png'; sc.render.image_settings.file_format = 'PNG'
