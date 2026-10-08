@@ -270,14 +270,13 @@ if PROJBACK:
         if is_front: front_coef = coef
         else: back_coef = coef
     me.vertices.foreach_set('co', v.reshape(-1)); me.update()
-    ztop = float(os.environ.get('FIN_Z', 0.383))
+    # one flat cut along the frame's top edge removes the lock fin and leaves a clean straight top
+    ztop = float(os.environ.get('FIN_Z', 0.376))
     bm = bmesh.new(); bm.from_mesh(me)
-    fin = [f for f in bm.faces if f.calc_center_median().z > ztop and abs(f.calc_center_median().y) < 0.09]
-    bmesh.ops.delete(bm, geom=fin, context='FACES')
-    bmesh.ops.delete(bm, geom=[vv for vv in bm.verts if not vv.link_faces], context='VERTS')
+    bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces), plane_co=(0, 0, ztop), plane_no=(0, 0, 1), clear_outer=True)
     hole = bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary], sides=0)['faces']
     for f in bmesh.ops.triangulate(bm, faces=hole)['faces']: f.material_index = 1
-    bm.to_mesh(me); bm.free(); me.update(); print('lock fin trimmed:', len(fin), 'faces', flush=True)
+    bm.to_mesh(me); bm.free(); me.update(); print('backrest top cut flat at', ztop, flush=True)
     v = np.zeros(len(me.vertices) * 3); me.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
     y0, y1 = np.percentile(v[:, 1], [0.5, 99.5]); z0, z1 = np.percentile(v[:, 2], [0.5, 99.5])
     def panel_box(img):
