@@ -384,6 +384,30 @@ if PROJBACK and os.environ.get('LUMBAR_SKIN') == '1':
         bm.to_mesh(lme); bm.free(); lme.update()
     print('lumbar re-skinned', flush=True)
 
+HEAD_SKIN = os.environ.get('HEAD_SKIN')     # crop of the real headrest front (photo 15)
+if HEAD_SKIN:
+    ho = objs['headrest']; hme = ho.data
+    hv = np.zeros(len(hme.vertices) * 3); hme.vertices.foreach_get('co', hv); hv = hv.reshape(-1, 3)
+    hn = np.zeros(len(hme.vertices) * 3); hme.vertices.foreach_get('normal', hn); hn = hn.reshape(-1, 3)
+    zb = float(os.environ.get('HB_Z', 0.376))
+    fr = (hn[:, 0] > 0.3) & (hv[:, 2] > zb - 0.002)
+    hy0, hy1 = np.percentile(hv[fr, 1], [0.5, 99.5]); hz0, hz1 = np.percentile(hv[fr, 2], [0.5, 99.5])
+    hl = np.zeros(len(hme.loops), np.int32); hme.loops.foreach_get('vertex_index', hl)
+    P = hv[hl]; uu = np.clip((P[:, 1] - hy0) / (hy1 - hy0), 0, 1); vv = np.clip((P[:, 2] - hz0) / (hz1 - hz0), 0, 1)
+    hme.uv_layers.new(name='head_uv').data.foreach_set('uv', np.c_[uu, vv].astype(np.float32).reshape(-1))
+    hm = mat.copy(); hm.name = 'headrest_photo'; nt = hm.node_tree
+    pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]; orig = pb.inputs['Base Color'].links[0].from_socket
+    tx = nt.nodes.new('ShaderNodeTexImage'); tx.image = bpy.data.images.load(os.path.abspath(HEAD_SKIN)); tx.extension = 'EXTEND'
+    uvn = nt.nodes.new('ShaderNodeUVMap'); uvn.uv_map = 'head_uv'; nt.links.new(uvn.outputs[0], tx.inputs['Vector'])
+    gm = nt.nodes.new('ShaderNodeGamma'); gm.inputs[1].default_value = 1.6; nt.links.new(tx.outputs['Color'], gm.inputs[0])
+    geo = nt.nodes.new('ShaderNodeNewGeometry'); sx = nt.nodes.new('ShaderNodeSeparateXYZ'); nt.links.new(geo.outputs['Normal'], sx.inputs[0])
+    mr = nt.nodes.new('ShaderNodeMapRange'); mr.inputs['From Min'].default_value = 0.25; mr.inputs['From Max'].default_value = 0.5
+    nt.links.new(sx.outputs['X'], mr.inputs['Value'])
+    mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; nt.links.new(mr.outputs['Result'], mx.inputs['Factor'])
+    nt.links.new(orig, mx.inputs[6]); nt.links.new(gm.outputs[0], mx.inputs[7]); nt.links.new(mx.outputs[2], pb.inputs['Base Color'])
+    hme.materials[0] = hm
+    print('headrest front re-skinned from photo', round(hy0, 3), round(hy1, 3), round(hz0, 3), round(hz1, 3), flush=True)
+
 NEWBACK = os.environ.get('NEWBACK')
 if NEWBACK:
     # swap in the backrest rebuilt from the real photos, fitted to where the old one sat
@@ -442,7 +466,7 @@ def add_glow(m):
     L.new(lw.outputs['Facing'], pw.inputs[0]); L.new(pw.outputs[0], mu.inputs[0]); L.new(at.outputs['Fac'], mu.inputs[1])
     L.new(mu.outputs[0], mu2.inputs[0]); L.new(mu2.outputs[0], em.inputs['Strength'])
     L.new(surf, add.inputs[0]); L.new(em.outputs[0], add.inputs[1]); L.new(add.outputs[0], out.inputs['Surface'])
-for m in {mat, chrome, cap_mat, fabric, *objs['backrest'].data.materials}: add_glow(m)
+for m in {mat, chrome, cap_mat, fabric, *objs['backrest'].data.materials, *objs['headrest'].data.materials}: add_glow(m)
 
 # wheel offsets: straight down plus outward from the hub
 hub = np.array([0.01, 0.0])
