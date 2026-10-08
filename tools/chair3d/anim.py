@@ -254,6 +254,7 @@ area('fill', (1.8, -0.8, 1.0), 140, 3.0)
 area('rim', (-2.0, 1.8, 1.6), 450, 1.5)
 bpy.ops.mesh.primitive_plane_add(size=8, location=(0, 0, FLOOR0)); floor = bpy.context.object
 floor.is_shadow_catcher = True
+floor.visible_glossy = False          # keep the floor out of the chrome's reflections
 
 cam = bpy.data.cameras.new('cam'); cam.lens = 50
 camo = bpy.data.objects.new('cam', cam); sc.collection.objects.link(camo); sc.camera = camo
