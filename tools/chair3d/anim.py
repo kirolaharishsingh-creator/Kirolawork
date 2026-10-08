@@ -238,8 +238,11 @@ bg = world.node_tree.nodes['Background']; bg.inputs[1].default_value = 0.45
 wn, wl = world.node_tree.nodes, world.node_tree.links
 tc = wn.new('ShaderNodeTexCoord'); sep = wn.new('ShaderNodeSeparateXYZ'); ramp = wn.new('ShaderNodeValToRGB')
 wl.new(tc.outputs['Generated'], sep.inputs[0]); wl.new(sep.outputs['Z'], ramp.inputs['Fac'])
-ramp.color_ramp.elements[0].position = 0.42; ramp.color_ramp.elements[0].color = (0.04, 0.04, 0.045, 1)
-ramp.color_ramp.elements[1].position = 0.75; ramp.color_ramp.elements[1].color = (0.95, 0.95, 0.97, 1)
+cr = ramp.color_ramp
+cr.elements[0].position = 0.0; cr.elements[0].color = (0.03, 0.03, 0.035, 1)
+cr.elements[1].position = 1.0; cr.elements[1].color = (0.45, 0.45, 0.47, 1)
+for pos, v in ((0.48, 0.03), (0.56, 0.95), (0.66, 0.18), (0.8, 0.7)):      # dark floor, bright horizon strip, dark band, soft top
+    e = cr.elements.new(pos); e.color = (v, v, v * 1.02, 1)
 wl.new(ramp.outputs['Color'], bg.inputs[0])
 
 def area(name, loc, energy, size):
