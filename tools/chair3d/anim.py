@@ -274,6 +274,24 @@ def pose(t):
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, t)
     camera_at(t)
 
+if MODE == 'parts':
+    # each part alone, from two sides, to check that it looks complete on its own
+    pose(0.0); floor.hide_render = True; sc.render.film_transparent = True
+    sc.render.resolution_x = sc.render.resolution_y = 300
+    os.makedirs('parts', exist_ok=True)
+    order = ['headrest', 'backrest', 'frame', 'lumbar', 'seat', 'arm_l', 'arm_r', 'mechanism', 'gas_lift', 'base', 'wheel0']
+    for n in order:
+        for o in objs.values(): o.hide_render = (o is not objs[n])
+        v = np.zeros(len(objs[n].data.vertices) * 3); objs[n].data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
+        c = mathutils.Vector(((v.min(0) + v.max(0)) / 2).tolist()); r = float(np.linalg.norm(v.max(0) - v.min(0))) / 2
+        for side, azd in (('a', 228), ('b', 40)):
+            az = math.radians(azd); el = math.radians(15); d = r / math.tan(math.radians(9)) + r
+            pos = c + d * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
+            camo.location = pos; camo.rotation_euler = (c - pos).to_track_quat('-Z', 'Y').to_euler()
+            sc.render.filepath = f'/home/user/parts/{n}_{side}.png'; bpy.ops.render.render(write_still=True)
+        print('part', n, flush=True)
+    sys.exit()
+
 import os
 frames = [60] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
 for f in frames:
