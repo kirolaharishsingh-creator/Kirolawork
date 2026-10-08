@@ -49,7 +49,7 @@ def mask2d(p, st, pad=30):
 
 # ---- mesh panels: close the tunnels, splice the closed panel into the original part
 GROW, VOX, D = float(os.environ.get('GROW', 0.0025)), float(os.environ.get('VOXEL', 0.0012)), float(os.environ.get('D', 0.0035))
-E, OV, ST = float(os.environ.get('E', 0.002)), float(os.environ.get('OV', 0.002)), 0.001
+E, OV, ST = float(os.environ.get('E', 0.0035)), float(os.environ.get('OV', 0.002)), 0.001
 PANEL = {}
 for i in (0, 1, 2):
     o = P[i]; cl = o.copy(); cl.data = o.data.copy(); bpy.context.scene.collection.objects.link(cl)
@@ -297,7 +297,7 @@ nt.links.new(t.outputs['Color'], pb.inputs['Base Color'])
 bp = nt.nodes.new('ShaderNodeBump'); bp.inputs['Strength'].default_value = 0.15; bp.inputs['Distance'].default_value = 0.0004
 nt.links.new(t.outputs['Color'], bp.inputs['Height']); nt.links.new(bp.outputs['Normal'], pb.inputs['Normal'])
 # the real mesh is a see-through weave: the V frame and brackets behind it show faintly (MESH_SEE of the light passes)
-see = float(os.environ.get('MESH_SEE', 0.3))
+see = float(os.environ.get('MESH_SEE', 0.1))
 if see > 0:
     tr = nt.nodes.new('ShaderNodeBsdfTransparent'); mx = nt.nodes.new('ShaderNodeMixShader'); mx.inputs[0].default_value = see
     mo = nt.nodes['Material Output']; nt.links.new(pb.outputs[0], mx.inputs[1]); nt.links.new(tr.outputs[0], mx.inputs[2]); nt.links.new(mx.outputs[0], mo.inputs['Surface'])
