@@ -56,6 +56,24 @@ wxy = c[low, :2].mean(0); wsel = low & (np.hypot(c[:, 0] - wxy[0], c[:, 1] - wxy
 P[91] = split_faces(b, wsel, 'wheel_5'); GROUPS['wheels'].append(91)
 print('base: column', int(col.sum()), 'faces, caster', int(wsel.sum()), 'faces at', wxy.round(3))
 
+# ---- mechanism: rebuild it as one closed, clean shell (Tripo's surface has pin-holes and split seams),
+# then cut out the small bridge Tripo moulded between the two lever paddles and cap both cut faces
+me4 = P[4]; bpy.context.view_layer.objects.active = me4
+md = me4.modifiers.new('rm', 'REMESH'); md.mode = 'VOXEL'; md.voxel_size = float(os.environ.get('MECH_VOXEL', 0.0008))
+bpy.ops.object.modifier_apply(modifier='rm')
+md = me4.modifiers.new('sm', 'CORRECTIVE_SMOOTH'); md.iterations = 4; md.use_only_smooth = True
+bpy.ops.object.modifier_apply(modifier='sm')
+LB = [float(x) for x in os.environ.get('LEVER_BRIDGE', '-0.190,-0.172,-0.002,0.014').split(',')]   # x0,x1,y0,y1
+c = face_centres(me4); br = (c[:, 0] > LB[0]) & (c[:, 0] < LB[1]) & (c[:, 1] > LB[2]) & (c[:, 1] < LB[3])
+bm = bmesh.new(); bm.from_mesh(me4.data); bm.faces.ensure_lookup_table()
+bmesh.ops.delete(bm, geom=[f for f, k in zip(bm.faces, br) if k], context='FACES')
+bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+filled = bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary], sides=0)['faces']
+bmesh.ops.triangulate(bm, faces=filled)
+bm.to_mesh(me4.data); bm.free()
+me4.data.polygons.foreach_set('use_smooth', np.ones(len(me4.data.polygons), bool)); me4.data.update()
+print('mechanism rebuilt:', len(me4.data.polygons), 'faces; lever bridge removed', int(br.sum()), 'faces, capped with', len(filled))
+
 # ---- materials
 def photo_box(img, inset=0.09):
     w, h = img.size; px = np.array(img.pixels[:], np.float32).reshape(h, w, 4)
@@ -66,10 +84,11 @@ def photo_box(img, inset=0.09):
 
 def fabric(name, path, uvname):
     m = bpy.data.materials.new(name); m.use_nodes = True; nt = m.node_tree; pb = nt.nodes['Principled BSDF']
-    pb.inputs['Roughness'].default_value = 0.7; pb.inputs['Specular IOR Level'].default_value = 0.25
+    pb.inputs['Roughness'].default_value = 0.9; pb.inputs['Specular IOR Level'].default_value = 0.15   # fabric: no shine
     t = nt.nodes.new('ShaderNodeTexImage'); t.image = bpy.data.images.load(path); t.extension = 'EXTEND'
     u = nt.nodes.new('ShaderNodeUVMap'); u.uv_map = uvname; nt.links.new(u.outputs[0], t.inputs['Vector'])
-    gm = nt.nodes.new('ShaderNodeGamma'); gm.inputs[1].default_value = float(os.environ.get('FAB_GAMMA', 1.25))
+    # the real photo's fabric as it is: its own colours and stripes, no extra grading (FAB_GAMMA stays 1.0)
+    gm = nt.nodes.new('ShaderNodeGamma'); gm.inputs[1].default_value = float(os.environ.get('FAB_GAMMA', 1.0))
     nt.links.new(t.outputs['Color'], gm.inputs[0]); nt.links.new(gm.outputs[0], pb.inputs['Base Color'])
     return m, photo_box(t.image)
 
@@ -137,18 +156,134 @@ print('backrest mesh faces with real fabric: front', int(front.sum()), 'back', i
 # is wrapped onto the front faces, same scale across and down, anchored at the pad's top edge
 HP = os.environ.get('HEAD_PHOTO')
 if HP:
-    hd = P[9]; hv = verts(hd); c = face_centres(hd); n = face_normals(hd)
-    fr = n[:, 1] < -0.3; fv = c[fr]
+    hd = P[9]
+    bm = bmesh.new(); bm.from_mesh(hd.data); bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=2e-4)   # weld Tripo's seam splits first
+    bm.to_mesh(hd.data); bm.free(); hd.data.update(); hv = verts(hd)
+    # Tripo moulded faint outlines and bumps into the pad (where it pieced it together): settle the front
+    # surface onto one smooth fitted curve, blending into the untouched rim
+    vn = np.zeros(len(hv) * 3); hd.data.vertices.foreach_get('normal', vn); vn = vn.reshape(-1, 3)
+    st = 0.0015; pad = 20; hx0_, hz0_ = hv[:, 0].min() - pad * st, hv[:, 2].min() - pad * st
+    gnx, gnz = int(np.ptp(hv[:, 0]) / st) + 2 * pad + 1, int(np.ptp(hv[:, 2]) / st) + 2 * pad + 1
+    sil = np.zeros((gnx, gnz), bool); sil[((hv[:, 0] - hx0_) / st).astype(int), ((hv[:, 2] - hz0_) / st).astype(int)] = True
+    sil = ndimage.binary_fill_holes(ndimage.binary_closing(sil, iterations=4))
+    dist = ndimage.distance_transform_edt(ndimage.gaussian_filter(sil.astype(float), 4) > 0.5) * st
+    dv = dist[((hv[:, 0] - hx0_) / st).astype(int), ((hv[:, 2] - hz0_) / st).astype(int)]
+    frontv = vn[:, 1] < -0.25
+    RIM = float(os.environ.get('HEAD_RIM', 0.010))
+    sel = frontv & (dv > RIM)
+    B = basis(hv[sel, 0], hv[sel, 2]); cf = np.linalg.lstsq(B, hv[sel, 1], rcond=None)[0]
+    for _ in range(4):
+        rr = np.abs(B @ cf - hv[sel, 1]); k = rr < np.percentile(rr, 70); cf = np.linalg.lstsq(B[k], hv[sel, 1][k], rcond=None)[0]
+    w = np.clip((dv - RIM) / 0.008, 0, 1) * frontv
+    hv[:, 1] = hv[:, 1] * (1 - w) + (basis(hv[:, 0], hv[:, 2]) @ cf) * w
+    hd.data.vertices.foreach_set('co', hv.reshape(-1)); hd.data.update()
+    print('headrest front smoothed:', int((w > 0).sum()), 'vertices')
+    # the top edge curls backwards, so the fit above can't reach it: relax its bumps and slots in place
+    ztop = hv[:, 2].max()
+    bm = bmesh.new(); bm.from_mesh(hd.data); bm.verts.ensure_lookup_table()
+    band = [bm.verts[i] for i in np.nonzero((hv[:, 2] > ztop - float(os.environ.get('HEAD_TOP_BAND', 0.035))) & (vn[:, 1] < 0.35))[0]]
+    for _ in range(int(os.environ.get('HEAD_TOP_IT', 40))):
+        bmesh.ops.smooth_vert(bm, verts=band, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    bm.to_mesh(hd.data); bm.free(); hd.data.update(); hv = verts(hd)
+    print('headrest top edge relaxed:', len(band), 'vertices')
+    c = face_centres(hd); n = face_normals(hd)
+    fr = n[:, 1] < -float(os.environ.get('HEAD_FACING', 0.5)); fv = c[fr]   # the photo only on the forward-facing pad
     hx0, hx1 = np.percentile(fv[:, 0], [0.3, 99.7]); hz1 = np.percentile(fv[:, 2], 99.7)
     img = bpy.data.images.load(HP); ar = img.size[0] / img.size[1]
     lv = np.zeros(len(hd.data.loops), int); hd.data.loops.foreach_get('vertex_index', lv); p = hv[lv]
-    uv = np.c_[(p[:, 0] - hx0) / (hx1 - hx0), 1 - (hz1 - p[:, 2]) / (hx1 - hx0) * ar]
+    uv = np.c_[(p[:, 0] - hx0) / (hx1 - hx0), np.minimum(1 - (hz1 - p[:, 2]) / (hx1 - hx0) * ar, 0.97)]   # keep off the photo's top rows (wall)
     hd.data.uv_layers.new(name='head_uv').data.foreach_set('uv', uv.astype(np.float32).reshape(-1))
     hm, _ = fabric('headrest_photo_fabric', HP, 'head_uv')
+    # the photo is underexposed: its black is far deeper than the soft black fabric of the rim. Lift only
+    # the darkest tones to the rim's level (the stripes keep their real look)
+    nt = hm.node_tree; pb = nt.nodes['Principled BSDF']; src = pb.inputs['Base Color'].links[0].from_socket
+    mx = nt.nodes.new('ShaderNodeMix'); mx.data_type = 'RGBA'; mx.blend_type = 'LIGHTEN'; mx.inputs['Factor'].default_value = 1.0
+    lv_ = float(os.environ.get('HEAD_BLACK', 0.02)); mx.inputs[7].default_value = (lv_, lv_, lv_ * 1.05, 1)
+    hs = nt.nodes.new('ShaderNodeHueSaturation'); hs.inputs['Saturation'].default_value = 0.0
+    nt.links.new(src, hs.inputs['Color']); nt.links.new(hs.outputs['Color'], mx.inputs[6]); nt.links.new(mx.outputs[2], pb.inputs['Base Color'])
     hd.data.materials.append(hm); k = len(hd.data.materials) - 1
     mi = np.zeros(len(c), np.int32); hd.data.polygons.foreach_get('material_index', mi); mi[fr] = k
     hd.data.polygons.foreach_set('material_index', mi); hd.data.update()
     print('headrest front from photo:', int(fr.sum()), 'faces')
+    # the real headrest is a thin fabric shield; the spine's plastic loop carries it from behind. Rebuild it
+    # cleanly: the outline of its front (seen from the front), the smooth front curve fitted above, and a
+    # fabric body ~1.5 cm deep. The plastic-looking back shell is gone. The front and back faces both carry
+    # the real headrest photo (from behind the see-through mesh panels show mirrored); the edge is black fabric.
+    hv = verts(hd); vn = np.zeros(len(hv) * 3); hd.data.vertices.foreach_get('normal', vn); vn = vn.reshape(-1, 3)
+    fv_ = hv[vn[:, 1] < -0.05]
+    st = 0.0015; pad = 12; gx0, gz0 = fv_[:, 0].min() - pad * st, fv_[:, 2].min() - pad * st
+    gnx, gnz = int(np.ptp(fv_[:, 0]) / st) + 2 * pad + 1, int(np.ptp(fv_[:, 2]) / st) + 2 * pad + 1
+    m_ = np.zeros((gnx, gnz), bool); m_[((fv_[:, 0] - gx0) / st).astype(int), ((fv_[:, 2] - gz0) / st).astype(int)] = True
+    m_ = ndimage.binary_fill_holes(ndimage.binary_closing(m_, iterations=5))
+    m_ = ndimage.binary_erosion(ndimage.gaussian_filter(m_.astype(float), 5) > 0.5, iterations=1)   # smooth outline
+    ci, cj = np.nonzero(m_); used = np.zeros((gnx + 1, gnz + 1), bool)
+    for di in (0, 1):
+        for dj in (0, 1): used[ci + di, cj + dj] = True
+    ui, uj = np.nonzero(used); corner = np.full((gnx + 1, gnz + 1), -1); corner[ui, uj] = np.arange(len(ui))
+    X, Z = gx0 + ui * st, gz0 + uj * st
+    # a gentle curve for the whole shield: a quadratic fitted to the pad's front (no extrapolated curl)
+    fr_v = hv[vn[:, 1] < -0.3]
+    def b2(x, z): return np.c_[np.ones_like(x), x, z, x * x, x * z, z * z]
+    c2 = np.linalg.lstsq(b2(fr_v[:, 0], fr_v[:, 2]), fr_v[:, 1], rcond=None)[0]
+    for _ in range(4):
+        rr = np.abs(b2(fr_v[:, 0], fr_v[:, 2]) @ c2 - fr_v[:, 1]); kk = rr < np.percentile(rr, 75)
+        c2 = np.linalg.lstsq(b2(fr_v[kk, 0], fr_v[kk, 2]), fr_v[kk, 1], rcond=None)[0]
+    Y = b2(X, Z) @ c2
+    quads = np.c_[corner[ci, cj], corner[ci + 1, cj], corner[ci + 1, cj + 1], corner[ci, cj + 1]]
+    sh = bpy.data.meshes.new('headrest_shield'); sh.from_pydata(np.c_[X, Y, Z].tolist(), [], quads.tolist()); sh.update()
+    nn = np.zeros(len(quads) * 3); sh.polygons.foreach_get('normal', nn)
+    if nn.reshape(-1, 3)[:, 1].mean() > 0: sh.flip_normals()     # front faces look forward (-y)
+    # smooth the stair-stepped outline: relax the border ring (and the row inside it) in the x-z plane
+    bm = bmesh.new(); bm.from_mesh(sh); bm.verts.ensure_lookup_table()
+    edge_v = {v for e in bm.edges if e.is_boundary for v in e.verts}
+    ring2 = {w for v in edge_v for e in v.link_edges for w in e.verts} - edge_v
+    for it in range(30):
+        for vset, f in ((edge_v, 0.5), (ring2, 0.25)):
+            new = {}
+            for v in vset:
+                nb = [e.other_vert(v) for e in v.link_edges if (e.is_boundary or v not in edge_v)]
+                if nb:
+                    cx = sum(w.co.x for w in nb) / len(nb); cz = sum(w.co.z for w in nb) / len(nb)
+                    new[v] = (v.co.x + f * (cx - v.co.x), v.co.z + f * (cz - v.co.z))
+            for v, (x, z) in new.items(): v.co.x, v.co.z = x, z
+    for v in bm.verts: v.co.y = float(b2(np.array([v.co.x]), np.array([v.co.z])) @ c2)
+    bm.to_mesh(sh); bm.free(); sh.update()
+    for m in hd.data.materials: sh.materials.append(m)
+    sv = np.zeros(len(sh.vertices) * 3); sh.vertices.foreach_get('co', sv); sv = sv.reshape(-1, 3)
+    lvs = np.zeros(len(sh.loops), int); sh.loops.foreach_get('vertex_index', lvs)
+    uvs = np.c_[(sv[:, 0] - hx0) / (hx1 - hx0), np.minimum(1 - (hz1 - sv[:, 2]) / (hx1 - hx0) * ar, 0.96)][lvs]
+    sh.uv_layers.new(name='UVMap'); sh.uv_layers.new(name='head_uv').data.foreach_set('uv', uvs.astype(np.float32).reshape(-1))
+    sh.polygons.foreach_set('material_index', np.full(len(quads), k, np.int32))
+    old_me = hd.data; hd.data = sh; bpy.data.meshes.remove(old_me)
+    nfront = len(quads); bpy.context.view_layer.objects.active = hd
+    sd = hd.modifiers.new('shield', 'SOLIDIFY'); sd.thickness = float(os.environ.get('HEAD_DEPTH', 0.015)); sd.offset = -1.0; sd.use_rim = True
+    bpy.ops.object.modifier_apply(modifier='shield')
+    mi = np.zeros(len(hd.data.polygons), np.int32); hd.data.polygons.foreach_get('material_index', mi)
+    mi[2 * nfront:] = 0                                         # the edge: black fabric (slot 0)
+    # the back: as on the real chair (seen from behind) one large mesh panel inside a black fabric border.
+    # The mesh is a crop of the real headrest's back photo, repeated at its real scale
+    HB = os.environ.get('HEAD_BACK_MESH', os.path.join(os.path.dirname(os.path.abspath(HP)), 'headrest_back_mesh_seamless.png'))   # straight stripes built from the real back photo
+    if os.path.exists(HB):
+        cb_ = face_centres(hd)[nfront:2 * nfront]
+        dist = ndimage.distance_transform_edt(m_) * st
+        ii = np.clip(((cb_[:, 0] - gx0) / st).astype(int), 0, m_.shape[0] - 1); jj = np.clip(((cb_[:, 2] - gz0) / st).astype(int), 0, m_.shape[1] - 1)
+        panel = dist[ii, jj] > float(os.environ.get('HEAD_BORDER', 0.016))
+        bmm = bpy.data.materials.new('headrest_back_mesh_fabric'); bmm.use_nodes = True; nt = bmm.node_tree; pb = nt.nodes['Principled BSDF']
+        pb.inputs['Roughness'].default_value = 0.9; pb.inputs['Specular IOR Level'].default_value = 0.15
+        tx = nt.nodes.new('ShaderNodeTexImage'); tx.image = bpy.data.images.load(HB); tx.extension = 'REPEAT'
+        uvn = nt.nodes.new('ShaderNodeUVMap'); uvn.uv_map = 'hb_uv'; nt.links.new(uvn.outputs[0], tx.inputs['Vector'])
+        hs = nt.nodes.new('ShaderNodeHueSaturation'); hs.inputs['Saturation'].default_value = 0.0
+        nt.links.new(tx.outputs['Color'], hs.inputs['Color']); nt.links.new(hs.outputs['Color'], pb.inputs['Base Color'])
+        hd.data.materials.append(bmm); kb = len(hd.data.materials) - 1
+        hvv = verts(hd); lvb = np.zeros(len(hd.data.loops), int); hd.data.loops.foreach_get('vertex_index', lvb); pp = hvv[lvb]
+        TW, TH = float(os.environ.get('HB_TILE_W', 0.26)), float(os.environ.get('HB_TILE_H', 0.048))   # the crop's real size
+        hd.data.uv_layers.new(name='hb_uv').data.foreach_set('uv', np.c_[-pp[:, 0] / TW, pp[:, 2] / TH].astype(np.float32).reshape(-1))
+        mi[nfront:2 * nfront] = np.where(panel, kb, 0)
+        print('headrest back: mesh panel', int(panel.sum()), 'faces inside a black fabric border')
+    hd.data.polygons.foreach_set('material_index', mi)
+    hd.data.polygons.foreach_set('use_smooth', np.ones(len(mi), bool)); hd.data.update()
+    print('headrest rebuilt as a fabric shield:', nfront, 'front faces + back face + edge; back shell removed')
+    HEAD_SHIELD = (m_, gx0, gz0, st, c2, float(os.environ.get('HEAD_DEPTH', 0.015)))   # for keeping the spine loop behind it
 
 # ---- base and column: matte black plastic (Tripo baked chrome reflections into a blotchy texture)
 plast = bpy.data.materials.new('frame_plastic'); plast.use_nodes = True; pb = plast.node_tree.nodes['Principled BSDF']
@@ -213,9 +348,12 @@ def assign(o, sel, mat):
 
 if os.environ.get('CLEAN', '1') == '1':
     PL = tuple(float(x) for x in os.environ.get('PLASTIC_RGB', '0.026,0.026,0.028').split(','))
-    for i in (0, 9, 2, 10, 4, 3, 7, 8):                       # black plastic, each keeping its own normal map
+    for i in (0, 2, 10, 4, 3, 7, 8):                          # black plastic
         o = P[i]; src = o.data.materials[0]; cm = clean_from(src, f'plastic_{i}', PL, 0.5)
         o.data.materials[0] = cm
+    # the headrest is only the fabric-covered shield (its plastic structure is the spine's V arm):
+    # rim and edges are soft black fabric, never plastic
+    P[9].data.materials[0] = clean_from(P[9].data.materials[0], 'headrest_rim_fabric', (0.02, 0.02, 0.021), 0.92, spec=0.2, sheen=0.3, weave=0.1)
     for i in (7, 8):                                          # armrest pads: soft-touch top
         o = P[i]; c = face_centres(o); pad = c[:, 2] > c[:, 2].max() - 0.028
         assign(o, pad, clean_from(o.data.materials[0], f'pad_{i}', (0.022, 0.022, 0.024), 0.78, spec=0.25, sheen=0.15))
@@ -223,7 +361,7 @@ if os.environ.get('CLEAN', '1') == '1':
     for i in GROUPS['wheels']:
         o = P[i]; o.data.materials[0] = clean_from(o.data.materials[0], f'rubber_{i}', (0.02, 0.02, 0.021), 0.55)
     # lumbar mesh, front and back, and the headrest's rear mesh: the same real fabric as the backrest
-    for i, ring in ((2, 0.022), (9, 0.016)):
+    for i, ring in ((2, 0.022),):                              # (the headrest's back now mirrors its front)
         o = P[i]; n = face_normals(o); inn = inner_region(o, ring)
         fr_ = inn & (n[:, 1] < -0.2) if i == 2 else np.zeros(len(n), bool)
         bk_ = inn & (n[:, 1] > 0.2)
@@ -288,6 +426,16 @@ if os.environ.get('SPINE_REMESH', '1') == '1':
     mi = np.zeros(len(c), np.int32); mi[ring] = 1; fr.data.polygons.foreach_set('material_index', mi)
     fr.data.polygons.foreach_set('use_smooth', np.ones(len(c), bool)); fr.data.update()
     print('spine rebuilt seamless:', len(c), 'faces; chrome ring faces', int(ring.sum()))
+if HP:
+    # the spine's loop must stay behind the thin headrest shield (the old thick pad used to hide its top tab)
+    m_, gx0, gz0, st, c2, depth = HEAD_SHIELD
+    fv = verts(fr); i = ((fv[:, 0] - gx0) / st).astype(int); j = ((fv[:, 2] - gz0) / st).astype(int)
+    ok = (i >= 0) & (i < m_.shape[0]) & (j >= 0) & (j < m_.shape[1]); inside = np.zeros(len(fv), bool)
+    inside[ok] = ndimage.binary_dilation(m_, iterations=2)[i[ok], j[ok]]
+    back = np.c_[np.ones(len(fv)), fv[:, 0], fv[:, 2], fv[:, 0] ** 2, fv[:, 0] * fv[:, 2], fv[:, 2] ** 2] @ c2 + depth + 0.002
+    push = inside & (fv[:, 1] < back)
+    fv[push, 1] = back[push]; fr.data.vertices.foreach_set('co', fv.reshape(-1)); fr.data.update()
+    print('spine loop kept behind the headrest shield:', int(push.sum()), 'vertices moved back')
 print('objects:', sorted(o.name for o in bpy.data.objects if o.type == 'MESH'))
 bpy.ops.file.pack_all(); bpy.ops.wm.save_as_mainfile(filepath=OUT)
 print('wrote', OUT)
