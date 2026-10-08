@@ -161,7 +161,7 @@ def camera_at(e):
 
 def pose(f):
     u = f / N
-    pivot.rotation_euler = (0, 0, 2 * math.pi * u)                    # one full turn: frame N = frame 0
+    pivot.rotation_euler = (0, 0, 0 if os.environ.get('NOROT') == '1' else 2 * math.pi * u)   # one full turn: frame N = frame 0
     for n, (i, off) in MOVES.items():
         k = amount(i, u); objs[n].location = (off[0] * k, off[1] * k, off[2] * k); objs[n]['glow'] = 4 * k * (1 - k)
         objs[n]['sweep'] = -0.06 + 1.12 * k; objs[n]['ray'] = min(1.0, 8 * k * (1 - k))
