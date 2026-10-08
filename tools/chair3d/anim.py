@@ -181,6 +181,11 @@ for spec in filter(None, os.environ.get('PART_TOPCUT', '').split(',')):
 if os.environ.get('CAPS', '1') == '1':
     for o in objs.values(): cap_holes(o.data)
 print('parts', sorted(objs), flush=True)
+if os.environ.get('EXPORT_PART'):
+    pn, path = os.environ['EXPORT_PART'].split(':')
+    bpy.ops.object.select_all(action='DESELECT'); objs[pn].select_set(True); bpy.context.view_layer.objects.active = objs[pn]
+    bpy.ops.export_scene.gltf(filepath=os.path.abspath(path), use_selection=True, export_format='GLB')
+    print('exported', pn, path, flush=True); sys.exit()
 
 # the AI texture reads mid-grey; darken it back to the real black mesh/plastic
 nt = mat.node_tree; pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
@@ -425,6 +430,25 @@ if STRAP_Z:
     for p in hme.polygons:
         if p.center.z > zs and p.normal.z > float(os.environ.get('STRAP_NZ', 0.35)): p.material_index = si; n += 1   # the strap's upper surface only
     hme.update(); print('headrest strap faces', n, flush=True)
+
+HEAD_REPLACE = os.environ.get('HEAD_REPLACE')   # headrest GLB exported from the first model: replaces this model's headrest
+if HEAD_REPLACE:
+    old = objs['headrest']; ov_ = np.zeros(len(old.data.vertices) * 3); old.data.vertices.foreach_get('co', ov_); ov_ = ov_.reshape(-1, 3)
+    before = set(bpy.data.objects); bpy.ops.import_scene.gltf(filepath=os.path.abspath(HEAD_REPLACE))
+    nh = [o for o in bpy.data.objects if o not in before and o.type == 'MESH'][0]
+    nh.data.transform(nh.matrix_world); nh.matrix_world = mathutils.Matrix.Identity(4); nh.parent = None
+    nv_ = np.zeros(len(nh.data.vertices) * 3); nh.data.vertices.foreach_get('co', nv_); nv_ = nv_.reshape(-1, 3)
+    # fit: match the width (y) and depth (x) of the pad and line the tops up
+    s = (np.ptp(ov_[:, 1]) / np.ptp(nv_[:, 1]) + np.ptp(ov_[:, 0]) / np.ptp(nv_[:, 0])) / 2
+    c_old = np.array([(ov_[:, 0].min() + ov_[:, 0].max()) / 2, (ov_[:, 1].min() + ov_[:, 1].max()) / 2, ov_[:, 2].max()])
+    c_new = np.array([(nv_[:, 0].min() + nv_[:, 0].max()) / 2, (nv_[:, 1].min() + nv_[:, 1].max()) / 2, nv_[:, 2].max()])
+    nv_ = (nv_ - c_new) * s + c_old
+    nh.data.vertices.foreach_set('co', nv_.reshape(-1)); nh.data.update()
+    for m in nh.data.materials:
+        if m.name.startswith('cap'): continue
+        treat_black(m); black_backfaces(m)
+    bpy.data.objects.remove(old); nh.name = 'headrest'; objs['headrest'] = nh
+    print('headrest replaced from', HEAD_REPLACE, 'scale', round(float(s), 3), flush=True)
 
 NEWBACK = os.environ.get('NEWBACK')
 if NEWBACK:
