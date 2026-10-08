@@ -38,7 +38,8 @@ def amount(i, t):
     return out * (1 - back)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.import_scene.gltf(filepath='chair.glb')
+from chairload import load_chair
+load_chair()
 src = [o for o in bpy.context.scene.objects if o.type == 'MESH'][0]
 mat = src.data.materials[0]
 
@@ -152,11 +153,11 @@ print('hub centre', HUBXY, flush=True)
 near_hub = lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.07
 if os.environ.get('PLANES', '1') == '1':
     # only under the mechanism's own footprint, so the seat keeps its whole underside
-    plane_split('seat', 'mechanism', -0.172, lambda x, y: -0.08 < x < 0.16 and abs(y) < 0.1, claim_above=-0.205)
+    plane_split('seat', 'mechanism', float(os.environ.get('Z_SEAT', -0.172)), lambda x, y: -0.08 < x < 0.16 and abs(y) < 0.1, claim_above=-0.205)
     plane_split('mechanism', 'gas_lift', -0.255, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045)
     # the column only: the hub socket and arm roots stay with the base
     # the chrome rod only: its wider housing stays with the base hub
-    plane_split('gas_lift', 'base', -0.33, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045, outside_to_b=True)
+    plane_split('gas_lift', 'base', float(os.environ.get('Z_GAS', -0.33)), lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045, outside_to_b=True)
     # armrests end in a clean cut where their bracket meets the seat
     plane_split('arm_r', 'seat', -0.16, lambda x, y: y > 0.21)       # outside the cushion's edge only
     plane_split('arm_l', 'seat', -0.16, lambda x, y: y < -0.21)
@@ -464,7 +465,7 @@ if MODE == 'parts':
             az = math.radians(azd); el = math.radians(15); d = 3.1 * r
             pos = c + d * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
             camo.location = pos; camo.rotation_euler = (c - pos).to_track_quat('-Z', 'Y').to_euler()
-            sc.render.filepath = f'/home/user/parts/{n}_{side}.png'; bpy.ops.render.render(write_still=True)
+            sc.render.filepath = f'{os.getcwd()}/parts/{n}_{side}.png'; bpy.ops.render.render(write_still=True)
         print('part', n, flush=True)
     sys.exit()
 
@@ -472,7 +473,7 @@ import os
 frames = [60] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1); os.makedirs('frames', exist_ok=True)
 for f in frames:
     t0 = time.time(); pose(f / FPS)
-    sc.render.filepath = f'/home/user/frames/{f:04d}.png'; sc.render.image_settings.file_format = 'PNG'
+    sc.render.filepath = f'{os.getcwd()}/frames/{f:04d}.png'; sc.render.image_settings.file_format = 'PNG'
     sc.render.image_settings.color_mode = 'RGBA'
     bpy.ops.render.render(write_still=True)
     print('frame', f, round(time.time() - t0, 1), flush=True)

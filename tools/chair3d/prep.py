@@ -3,7 +3,8 @@ import bpy, numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.import_scene.gltf(filepath='chair.glb')
+from chairload import load_chair
+load_chair()
 o = [o for o in bpy.context.scene.objects if o.type == 'MESH'][0]; me = o.data
 nv = len(me.vertices); co = np.zeros(nv * 3); me.vertices.foreach_get('co', co); co = co.reshape(-1, 3)
 M = np.array(o.matrix_world); co = co @ M[:3, :3].T + M[:3, 3]
