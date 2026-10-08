@@ -79,7 +79,7 @@ for n in ('base', 'gas_lift'):
 hub = np.array([0.01, 0.0])
 for i in range(5):
     o = objs['wheel%d' % i]
-    v = np.array([o.matrix_world @ p.co for p in o.data.vertices[::50]])
+    v = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
     d = v[:, :2].mean(0) - hub; d /= np.linalg.norm(d)
     MOVES['wheel%d' % i] = (7, (WHEEL_OUT * d[0], WHEEL_OUT * d[1], -WHEEL_DROP))
 
