@@ -2,12 +2,12 @@
 # fly far apart into a vertical stack (headrest on top, base and wheels at the bottom, armrests out to the
 # sides), hold, and come back together. The last frame is identical to the first.
 # Uses chair_fixed.blend from fix_m4.py / tripo_fix.py.
-# Usage: python3 anim3.py test|full   (env: BLEND, RES, SAMPLES, FRAMES, F0, F1, LIGHT, TEX_GAMMA, SECONDS)
+# Usage: python3 anim3.py test|full   (env: BLEND, RES, SAMPLES, FRAMES, F0, F1, LIGHT, TEX_GAMMA, DURATION)
 import bpy, sys, os, math, time, numpy as np, mathutils
 
 MODE = sys.argv[-1]
 FPS = 24
-SECONDS = float(os.environ.get('SECONDS', 4.8))
+SECONDS = float(os.environ.get('DURATION', 4.8))     # (not SECONDS: bash owns that name)
 N = int(round(SECONDS * FPS)) - 1          # last frame index; frames 0..N
 W = int(os.environ.get('RES', 960)); H = W * 9 // 16
 SAMPLES = int(os.environ.get('SAMPLES', 16))
@@ -85,7 +85,7 @@ def centre(o):
 hub = centre(objs['gas_lift'])[:2]
 pivot = bpy.data.objects.new('pivot', None); sc.collection.objects.link(pivot); pivot.location = (hub[0], hub[1], 0)
 for o in objs.values():
-    o.data.transform(mathutils.Matrix.Translation((-hub[0], -hub[1], 0))); o.parent = pivot
+    o.data.transform(mathutils.Matrix.Translation((-hub[0], -hub[1], 0))); o.parent = pivot; o.matrix_parent_inverse.identity()
 for i in range(5):
     d = centre(objs['wheel%d' % i])[:2]; d /= np.linalg.norm(d)
     MOVES['wheel%d' % i] = (7, (WHEEL_OUT * d[0], WHEEL_OUT * d[1], -WHEEL_DROP))
@@ -120,7 +120,7 @@ cam = bpy.data.cameras.new('cam'); cam.lens = 50
 camo = bpy.data.objects.new('cam', cam); sc.collection.objects.link(camo); sc.camera = camo
 AZ = math.radians(float(os.environ.get('CAM_AZ', 15)))     # a little off straight-front
 EL = math.radians(float(os.environ.get('CAM_EL', 6)))
-D0, D1 = float(os.environ.get('D0', 3.4)), float(os.environ.get('D1', 6.6))
+D0, D1 = float(os.environ.get('D0', 3.4)), float(os.environ.get('D1', 7.0))
 
 def camera_at(e):
     dist = D0 + (D1 - D0) * e
@@ -136,6 +136,7 @@ def pose(f):
     e = smooth((u - T_OUT + 0.03) / (T_HOLD - T_OUT)) * (1 - smooth((u - T_BACK) / (T_END - T_BACK + 0.03)))
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, u)
     camera_at(e)
+    bpy.context.view_layer.update()
 
 frames = [int(f) for f in os.environ.get('FRAMES', '0,30,57').split(',')] if MODE == 'test' else range(int(os.environ.get('F0', 0)), int(os.environ.get('F1', N)) + 1)
 os.makedirs('frames', exist_ok=True)
