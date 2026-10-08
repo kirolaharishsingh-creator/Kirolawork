@@ -3,7 +3,7 @@
 #   python3 anim.py test   -> renders a few check frames
 #   python3 anim.py full   -> renders every frame to frames/####.png (RGBA, shadow-catcher floor)
 import bpy, sys, math, time, numpy as np, mathutils
-from parts import label_components, PART_NAMES
+from parts import vertex_parts, PART_NAMES
 
 MODE = sys.argv[-1]
 FPS, N = 24, 115                  # 4.8 s
@@ -44,7 +44,7 @@ mat = src.data.materials[0]
 
 # label faces by part (via loose-shell labels), then split into one object per part
 co = np.load('co.npy'); lab = np.load('lab.npy')
-vpart = label_components(co, lab, np.load('tri.npy'))[lab]
+vpart = vertex_parts(co, lab, np.load('tri.npy'))
 me = src.data
 nf = len(me.polygons); lst = np.zeros(nf, int); me.polygons.foreach_get('loop_start', lst)
 lv = np.zeros(len(me.loops), int); me.loops.foreach_get('vertex_index', lv)
@@ -103,7 +103,11 @@ nt.links.new(comb.outputs[0], pb.inputs['Base Color'])
 chrome_src = mat.copy()
 for l in list(pb.inputs['Metallic'].links): nt.links.remove(l)
 pb.inputs['Metallic'].default_value = 0.0
-pb.inputs['Specular IOR Level'].default_value = 0.3
+pb.inputs['Specular IOR Level'].default_value = 0.25
+# roughness floor: glossy spots in the AI roughness map mirrored the bright ceiling as white patches
+rl = pb.inputs['Roughness'].links[0].from_socket
+rmax = nt.nodes.new('ShaderNodeMath'); rmax.operation = 'MAXIMUM'; rmax.inputs[1].default_value = 0.6
+nt.links.new(rl, rmax.inputs[0]); nt.links.new(rmax.outputs[0], pb.inputs['Roughness'])
 
 # polished chrome for the base and gas lift (keeps the texture's dark details)
 chrome = chrome_src; chrome.name = 'chrome'
