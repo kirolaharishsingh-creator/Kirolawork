@@ -1,11 +1,10 @@
 # Lay the per-part renders out in a labelled grid on the studio grey.
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
+from comp import over as _over
+BGc = np.array([202, 198, 194], np.float32) / 255
 def over(rgba):
-    a8 = rgba[..., 3]; im = rgba.astype(np.float32) / 255; a = im[..., 3:]
-    ac = np.asarray(Image.fromarray(a8).filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.MinFilter(9)), np.float32)[..., None] / 255
-    ac = np.maximum(ac, a); bg = np.array([202, 198, 194], np.float32) / 255; fill = np.array([40, 40, 42], np.float32) / 255
-    return Image.fromarray((np.clip(im[..., :3] * a + fill * (ac - a) + bg * (1 - ac), 0, 1) * 255).astype(np.uint8))
+    return Image.fromarray(_over(rgba, BGc))
 order = ['headrest', 'backrest', 'frame', 'lumbar', 'seat', 'arm_l', 'arm_r', 'mechanism', 'gas_lift', 'base', 'wheel0']
 label = {'headrest': 'Headrest', 'backrest': 'Backrest', 'frame': 'Spine frame', 'lumbar': 'Lumbar', 'seat': 'Seat',
          'arm_l': 'Armrest L', 'arm_r': 'Armrest R', 'mechanism': 'Mechanism', 'gas_lift': 'Gas lift', 'base': 'Base', 'wheel0': 'Wheel'}

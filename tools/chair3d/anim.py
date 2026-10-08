@@ -205,12 +205,12 @@ def fabric_material(src_mat):
     f = src_mat.copy(); f.name = 'backrest_fabric'; nt = f.node_tree
     pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
     col = pb.inputs['Base Color'].links[0].from_socket
-    mix = nt.nodes.new('ShaderNodeMix'); mix.data_type = 'RGBA'; mix.inputs['Factor'].default_value = 0.95
-    nt.links.new(col, mix.inputs[6]); mix.inputs[7].default_value = (0.022, 0.022, 0.024, 1)
+    mix = nt.nodes.new('ShaderNodeMix'); mix.data_type = 'RGBA'; mix.inputs['Factor'].default_value = 0.92
+    nt.links.new(col, mix.inputs[6]); mix.inputs[7].default_value = (0.04, 0.04, 0.043, 1)
     tc = nt.nodes.new('ShaderNodeTexCoord'); wave = nt.nodes.new('ShaderNodeTexWave')
-    wave.bands_direction = 'Z'; wave.inputs['Scale'].default_value = 60.0; wave.inputs['Distortion'].default_value = 0.0
+    wave.bands_direction = 'Z'; wave.inputs['Scale'].default_value = 140.0; wave.inputs['Distortion'].default_value = 0.0
     nt.links.new(tc.outputs['Object'], wave.inputs['Vector'])
-    ramp = nt.nodes.new('ShaderNodeMapRange'); ramp.inputs['To Min'].default_value = 0.55; ramp.inputs['To Max'].default_value = 1.0
+    ramp = nt.nodes.new('ShaderNodeMapRange'); ramp.inputs['To Min'].default_value = 0.35; ramp.inputs['To Max'].default_value = 1.0
     nt.links.new(wave.outputs['Fac'], ramp.inputs['Value'])
     mul = nt.nodes.new('ShaderNodeMix'); mul.data_type = 'RGBA'; mul.blend_type = 'MULTIPLY'; mul.inputs['Factor'].default_value = 1.0
     nt.links.new(mix.outputs[2], mul.inputs[6]); nt.links.new(ramp.outputs['Result'], mul.inputs[7])
@@ -305,9 +305,9 @@ def pose(t):
 if MODE == 'parts':
     # each part alone, from two sides, to check that it looks complete on its own
     pose(0.0); floor.hide_render = True; sc.render.film_transparent = True
-    sc.render.resolution_x = sc.render.resolution_y = 300
+    sc.render.resolution_x = sc.render.resolution_y = int(os.environ.get('PRES', 300))
     os.makedirs('parts', exist_ok=True)
-    order = ['headrest', 'backrest', 'frame', 'lumbar', 'seat', 'arm_l', 'arm_r', 'mechanism', 'gas_lift', 'base', 'wheel0']
+    order = os.environ.get('ONLY', 'headrest,backrest,frame,lumbar,seat,arm_l,arm_r,mechanism,gas_lift,base,wheel0').split(',')
     for n in order:
         for o in objs.values(): o.hide_render = (o is not objs[n])
         v = np.zeros(len(objs[n].data.vertices) * 3); objs[n].data.vertices.foreach_get('co', v); v = v.reshape(-1, 3)
