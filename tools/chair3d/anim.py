@@ -411,9 +411,9 @@ if HEAD_SKIN:
 STRAP_Z = os.environ.get('STRAP_Z')         # top of the headrest above this is the padded fabric strap
 if STRAP_Z:
     sm = bpy.data.materials.new('headrest_strap'); sm.use_nodes = True; nt = sm.node_tree
-    pb = nt.nodes['Principled BSDF']; pb.inputs['Base Color'].default_value = (0.03, 0.03, 0.032, 1)
-    pb.inputs['Roughness'].default_value = 0.85; pb.inputs['Specular IOR Level'].default_value = 0.2
-    pb.inputs['Sheen Weight'].default_value = 0.6; pb.inputs['Sheen Roughness'].default_value = 0.35
+    pb = nt.nodes['Principled BSDF']; pb.inputs['Base Color'].default_value = (0.011, 0.011, 0.012, 1)
+    pb.inputs['Roughness'].default_value = 0.92; pb.inputs['Specular IOR Level'].default_value = 0.12
+    pb.inputs['Sheen Weight'].default_value = 0.08; pb.inputs['Sheen Roughness'].default_value = 0.5
     tc = nt.nodes.new('ShaderNodeTexCoord'); nz = nt.nodes.new('ShaderNodeTexNoise'); nz.inputs['Scale'].default_value = 900.0
     wv = nt.nodes.new('ShaderNodeTexWave'); wv.inputs['Scale'].default_value = 260.0; wv.bands_direction = 'Y'
     nt.links.new(tc.outputs['Object'], nz.inputs['Vector']); nt.links.new(tc.outputs['Object'], wv.inputs['Vector'])
@@ -423,7 +423,7 @@ if STRAP_Z:
     hme = objs['headrest'].data; hme.materials.append(sm); si = len(hme.materials) - 1
     zs = float(STRAP_Z); n = 0
     for p in hme.polygons:
-        if p.center.z > zs and p.normal.z > -0.3: p.material_index = si; n += 1
+        if p.center.z > zs and p.normal.z > float(os.environ.get('STRAP_NZ', 0.35)): p.material_index = si; n += 1   # the strap's upper surface only
     hme.update(); print('headrest strap faces', n, flush=True)
 
 NEWBACK = os.environ.get('NEWBACK')
