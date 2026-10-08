@@ -185,8 +185,8 @@ chrome = chrome_src; chrome.name = 'chrome'
 bsdf = [n for n in chrome.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'][0]
 for l in list(bsdf.inputs['Metallic'].links) + list(bsdf.inputs['Roughness'].links) + list(bsdf.inputs['Base Color'].links):
     chrome.node_tree.links.remove(l)
-bsdf.inputs['Base Color'].default_value = (0.5, 0.5, 0.53, 1)
-bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.14
+bsdf.inputs['Base Color'].default_value = (0.85, 0.85, 0.88, 1)
+bsdf.inputs['Metallic'].default_value = 1.0; bsdf.inputs['Roughness'].default_value = 0.18
 for n in ('base', 'gas_lift'):
     objs[n].data.materials[0] = chrome
 
@@ -243,7 +243,7 @@ cr.elements[0].position = 0.0; cr.elements[0].color = (0.03, 0.03, 0.035, 1)
 cr.elements[1].position = 1.0; cr.elements[1].color = (0.45, 0.45, 0.47, 1)
 for pos, v in ((0.48, 0.03), (0.56, 0.95), (0.66, 0.18), (0.8, 0.7)):      # dark floor, bright horizon strip, dark band, soft top
     e = cr.elements.new(pos); e.color = (v, v, v * 1.02, 1)
-wl.new(ramp.outputs['Color'], bg.inputs[0])
+bg.inputs[0].default_value = (0.62, 0.62, 0.64, 1)   # even studio surround: chrome reads as clean silver (gradient left unlinked)
 
 def area(name, loc, energy, size):
     L = bpy.data.lights.new(name, 'AREA'); L.energy = energy; L.size = size
