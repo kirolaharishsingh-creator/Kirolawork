@@ -119,7 +119,7 @@ def mesh_from_arrays(name, co_, lv_, ls_, mi_, uv_):
     m.uv_layers.new(); m.uv_layers[0].data.foreach_set('uv', uv_.reshape(-1))
     m.polygons.foreach_set('material_index', mi_); m.update(); return m
 
-def plane_split(a, b, z, region):
+def plane_split(a, b, z, region, claim_above=False):
     # re-divide parts a (above) and b (below) along the flat plane at height z, inside region(x, y):
     # a clean straight cut instead of the AI model's ragged patchwork seam
     A, B = mesh_arrays(objs[a].data), mesh_arrays(objs[b].data)
@@ -134,6 +134,7 @@ def plane_split(a, b, z, region):
     for f in bm.faces:
         c = f.calc_center_median()
         if region(c.x, c.y): f.material_index = 0 if c.z > z else 1
+        elif claim_above and c.z > z: f.material_index = 0       # outside the footprint, everything above the cut belongs to a
     for name, keep in ((a, 0), (b, 1)):
         bm2 = bm.copy()
         bmesh.ops.delete(bm2, geom=[f for f in bm2.faces if f.material_index != keep], context='FACES')
@@ -147,7 +148,7 @@ HUBXY = (0.01, 0.0)
 near_hub = lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.07
 if os.environ.get('PLANES', '1') == '1':
     # only under the mechanism's own footprint, so the seat keeps its whole underside
-    plane_split('seat', 'mechanism', -0.172, lambda x, y: -0.08 < x < 0.16 and abs(y) < 0.1)
+    plane_split('seat', 'mechanism', -0.172, lambda x, y: -0.08 < x < 0.16 and abs(y) < 0.1, claim_above=True)
     plane_split('mechanism', 'gas_lift', -0.255, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.045)
     # the column only: the hub socket and arm roots stay with the base
     plane_split('gas_lift', 'base', -0.36, lambda x, y: math.hypot(x - HUBXY[0], y - HUBXY[1]) < 0.035)
