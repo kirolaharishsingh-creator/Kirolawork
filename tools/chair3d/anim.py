@@ -9,7 +9,7 @@ MODE = sys.argv[-1]
 FPS, N = 24, 115                  # 4.8 s
 import os
 W = int(os.environ.get('RES', 960)); H = W * 9 // 16
-SAMPLES = 16
+SAMPLES = int(os.environ.get('SAMPLES', 16))
 
 # part -> (stagger order, offset in metres: x forward, y lateral, z up)
 MOVES = {
