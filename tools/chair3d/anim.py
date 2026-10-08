@@ -82,7 +82,7 @@ for p, name in enumerate(PART_NAMES):
     m2.polygons.add(len(sel)); m2.polygons.foreach_set('loop_start', (np.arange(len(sel)) * 3).astype(np.int32))
     m2.uv_layers.new(); m2.uv_layers[0].data.foreach_set('uv', uv[sel].reshape(-1))
     m2.update(); m2.shade_smooth(); m2.materials.append(mat); m2.materials.append(cap_mat)
-    if os.environ.get('CAPS', '0') == '1': cap_holes(m2)
+    if os.environ.get('CAPS', '1') == '1': cap_holes(m2)
     o = bpy.data.objects.new(name, m2); bpy.context.scene.collection.objects.link(o); objs[name] = o
 bpy.data.objects.remove(src)
 print('parts', sorted(objs), flush=True)
