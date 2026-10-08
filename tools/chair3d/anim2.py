@@ -124,8 +124,8 @@ camo = bpy.data.objects.new('cam', cam); sc.collection.objects.link(camo); sc.ca
 def camera_at(t):
     az = math.radians(228 + 22 * math.sin(math.pi * t / 4.8))
     e = smooth((t - T0) / 0.8) * (1 - smooth((t - (HOLD_END + 7 * STEP)) / 0.8))
-    dist = 3.0 + 1.1 * e; el = math.radians(10)
-    target = mathutils.Vector((-0.08 - 0.08 * e, 0.0, 0.06 * e))
+    dist = 3.0 + float(os.environ.get('CAM_PULL', 1.1)) * e; el = math.radians(10)
+    target = mathutils.Vector((-0.08 - 0.08 * e, 0.0, float(os.environ.get('CAM_RISE', 0.06)) * e))
     pos = target + dist * mathutils.Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
     camo.location = pos; camo.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
 
