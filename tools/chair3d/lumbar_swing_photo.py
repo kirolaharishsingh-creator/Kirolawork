@@ -1,13 +1,13 @@
 # Lumbar USP loop from one photo-real still (the cleaned Nano Banana image, spine left / seat right): the lumbar pad is
 # cut out and rocked about its pivot bolt -- lower edge swinging forward, a short hold, back to rest -- as in the
-# reference video (about 5 degrees). Frame N equals frame 0, so it loops.
+# reference video (about 8 degrees at the tip). Frame N equals frame 0, so it loops.
 # Behind the pad the plate is rebuilt, not inpainted: the studio backdrop (smooth field from the bright pixels), the
 # seat below its own top-edge curve (fitted where the edge is visible) and the spine/bracket left of its outline, each
 # with the shading profile measured across its visible edge. The backrest above the pad top stays in front.
-# Usage: python3 lumbar_swing_photo.py still.jpg outdir   (env: ANGLE deg (5), FPS (24), SECONDS (2.5))
+# Usage: python3 lumbar_swing_photo.py still.jpg outdir   (env: ANGLE deg (8), FPS (24), SECONDS (2.5))
 import os, sys, numpy as np, cv2
 src, out = sys.argv[1], sys.argv[2]; os.makedirs(out, exist_ok=True)
-ANG = float(os.environ.get('ANGLE', 5)); FPS = int(os.environ.get('FPS', 24)); SEC = float(os.environ.get('SECONDS', 2.5))
+ANG = float(os.environ.get('ANGLE', 8)); FPS = int(os.environ.get('FPS', 24)); SEC = float(os.environ.get('SECONDS', 2.5))
 PIV = (563.0, 560.0)                                                   # pivot bolt (2000 x 1125 image)
 im = cv2.imread(src).astype(np.float32); H, W = im.shape[:2]; lum = im.mean(2)
 Y, X = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -35,6 +35,7 @@ tb = (X < 480) & (Y > 975) & (Y < 1040)
 pad[tb & ((X - Y < -578) | (Y > 1009 + 0.27 * (X - 430)))] = 0
 pad[tb & (X - Y >= -578) & (Y <= 1009 + 0.27 * (X - 430)) & (lum < 120) & poly(PADPOLY)] = 1
 pad = cv2.morphologyEx(pad, cv2.MORPH_CLOSE, k(2))
+pad[(lum > 150) & (Y > 780)] = 0                                         # no backdrop seams between pad and seat
 n, lab, st, _ = cv2.connectedComponentsWithStats(pad); pad = (lab == 1 + np.argmax(st[1:, 4])).astype(np.uint8)
 cnts, hier = cv2.findContours(pad, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
 for i, c in enumerate(cnts):                                            # fill small holes, keep the C's opening and mesh dots
@@ -66,21 +67,24 @@ syn = np.where(keep[..., None], inp, syn)
 # and under the tip the spine/bracket is its dark body inside its outline, backdrop outside
 tipbox = poly([(390, 975), (480, 975), (480, 1040), (390, 1040)])
 tipfill = np.where((spine & (X - Y < -581))[..., None], spine_fill, bg)
-syn = np.where(tipbox[..., None], np.where((pad > 0)[..., None], tipfill, im), syn)
+syn = np.where(tipbox[..., None], np.where((cv2.dilate(pad, k(2)) > 0)[..., None], tipfill, im), syn)
 R = cv2.GaussianBlur(cv2.dilate(pad, k(4)).astype(np.float32), (0, 0), 1.2)[..., None]
 # the spine's edge just left of the tip (hidden by it at rest) is redrawn as its straight 45-degree edge
-rim = poly([(404, 986), (438, 986), (438, 1016), (404, 1016)]) & (X - Y < -578)
+rim = poly([(400, 980), (446, 980), (446, 1024), (400, 1024)]) & (X - Y < -578)
 de = (-(X - Y) - 581.0) / np.sqrt(2)                                  # depth inside the spine's 45-degree edge here
 dq = np.clip(de, 0, 15); q0 = dq.astype(int); qf = (dq - q0)[..., None]
 edgefill = spine_prof[q0] * (1 - qf) + spine_prof[np.clip(q0 + 1, 0, 15)] * qf
 ca = np.clip(de + 0.5, 0, 1)[..., None]
 syn = np.where(rim[..., None], edgefill * ca + bg * (1 - ca), syn)
-R = np.where(tipbox[..., None], cv2.GaussianBlur(np.maximum(pad, rim).astype(np.float32), (0, 0), 0.6)[..., None], R)
+R = np.where(tipbox[..., None], cv2.GaussianBlur(cv2.dilate(np.maximum(pad, rim.astype(np.uint8)), k(2)).astype(np.float32), (0, 0), 0.6)[..., None], R)
 plate = im * (1 - R) + syn * R
 # the backrest above the pad top stays in front
 front = poly([(470, 250), (700, 250), (700, 372), (640, 362), (498, 366), (470, 380)]) & (lum < 120) & (pad == 0)
 front = cv2.GaussianBlur(front.astype(np.float32), (0, 0), 0.8)[..., None]
 
+dX, dY = X - PIV[0], Y - PIV[1]; rr = np.hypot(dX, dY)
+R0, R1 = float(os.environ.get('HOLD_R', 110)), float(os.environ.get('FULL_R', 300))
+wr = np.clip((rr - R0) / (R1 - R0), 0, 1); wr = wr * wr * (3 - 2 * wr)
 N = int(round(SEC * FPS)); ease = lambda u: u * u * (3 - 2 * u)
 def angle(i):                                                           # rest -> forward -> hold -> back -> rest
     u = i / N; t1, t2, t3 = 0.40, 0.52, 0.92
@@ -89,9 +93,13 @@ def angle(i):                                                           # rest -
     if u < t3: return ANG * (1 - ease((u - t2) / (t3 - t2)))
     return 0.0
 for i in range(N):
-    M = cv2.getRotationMatrix2D(PIV, angle(i), 1.0)
-    Lr = cv2.warpAffine(im, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    ra = cv2.warpAffine(a, M, (W, H), flags=cv2.INTER_LINEAR)[..., None]
+    # the mount around the bolt stays put and the turn grows with distance from it (top barely moves, the lower
+    # part swings most, as in the reference); a rotation keeps the radius, so the inverse map is direct
+    th = np.radians(angle(i)) * wr
+    c_, s_ = np.cos(th), np.sin(th)
+    mx = (PIV[0] + c_ * dX - s_ * dY).astype(np.float32); my = (PIV[1] + s_ * dX + c_ * dY).astype(np.float32)
+    Lr = cv2.remap(im, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    ra = cv2.remap(a, mx, my, cv2.INTER_LINEAR)[..., None]
     f = Lr * ra + plate * (1 - ra)
     f = im * front + f * (1 - front)
     if i == 0: f = im                                                  # rest frame is the still itself
