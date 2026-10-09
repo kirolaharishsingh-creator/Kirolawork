@@ -4,7 +4,8 @@
 # put and the turn grows with distance from it, so the top barely moves. Frame N equals frame 0, so it loops.
 # Behind the pad the plate is rebuilt: the studio backdrop, and at the tip the spine bracket's dark slot inside its two
 # upper-left edge. The seat and the backrest above the pad stay in front.
-# Usage: python3 lumbar_swing_side.py still.png outdir   (still: start_frame_lumbar_studio.jpg at 2000 x 1125)
+# Usage: python3 lumbar_swing_side.py still.png outdir   (still: start_frame_lumbar_studio.jpg at 2000 x 1125;
+#        env HI=<same photo on the studio backdrop at higher resolution> renders at that resolution)
 #        env: ANGLE deg (6), FPS (24), SECONDS (3)
 import os, sys, numpy as np, cv2
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -83,6 +84,20 @@ seat = poly([(1100, 520), (1350, 565), (1400, 605), (1450, 641), (1500, 676), (1
              (1640, 1125), (1100, 1125)]) & (lum < 30)
 front = poly([(1380, 60), (1600, 60), (1600, 200), (1485, 176), (1440, 144), (1390, 134), (1380, 120)]) & (lum < 120) & (pad == 0)
 F = cv2.GaussianBlur((seat | front).astype(np.float32), (0, 0), 0.7)[..., None]
+
+# high-quality render: the masks and fills are worked out on the 2000 px still, then carried over to a sharper
+# version of the same photo (env HI=path, e.g. the 3840 px studio still) and everything below runs at that size
+if os.environ.get('HI'):
+    hi = cv2.imread(os.environ['HI']).astype(np.float32); H2, W2 = hi.shape[:2]; sx, sy = W2 / W, H2 / H
+    up = lambda m, interp=cv2.INTER_LINEAR: cv2.resize(m, (W2, H2), interpolation=interp)
+    a = cv2.GaussianBlur(up(a), (0, 0), 0.9); F = up(F[..., 0])[..., None]; Rh = up(R[..., 0])[..., None]
+    padh = up(pad.astype(np.float32)) > 0.5
+    layer = np.where(padh[..., None], hi, up(ext, cv2.INTER_CUBIC))
+    edgeh = up(edge.astype(np.float32)) > 0.5
+    layer = np.where(edgeh[..., None], up(ext, cv2.INTER_CUBIC), layer)
+    plate = hi * (1 - Rh) + up(syn, cv2.INTER_CUBIC) * Rh
+    im, W, H = hi, W2, H2; PIV = (PIV[0] * sx, PIV[1] * sy)
+    Y, X = np.mgrid[0:H, 0:W].astype(np.float32); rr = np.hypot(X - PIV[0], Y - PIV[1])
 
 dX, dY = X - PIV[0], Y - PIV[1]
 R0, R1 = float(os.environ.get('HOLD_R', 0)), float(os.environ.get('FULL_R', 1))   # 0/1: the whole pad turns rigidly
