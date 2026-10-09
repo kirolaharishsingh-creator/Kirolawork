@@ -84,7 +84,7 @@ front = poly([(1380, 60), (1600, 60), (1600, 200), (1485, 176), (1440, 144), (13
 F = cv2.GaussianBlur((seat | front).astype(np.float32), (0, 0), 0.7)[..., None]
 
 dX, dY = X - PIV[0], Y - PIV[1]
-R0, R1 = 110.0, 300.0
+R0, R1 = float(os.environ.get('HOLD_R', 0)), float(os.environ.get('FULL_R', 1))   # 0/1: the whole pad turns rigidly
 wr = np.clip((rr - R0) / (R1 - R0), 0, 1); wr = wr * wr * (3 - 2 * wr)
 N = int(round(SEC * FPS)); ease = lambda u: u * u * (3 - 2 * u)
 def angle(i):                                                           # rest -> forward -> hold -> back -> rest
