@@ -71,7 +71,8 @@ inp = cv2.inpaint(np.clip(im, 0, 255).astype(np.uint8), cv2.dilate(pad, k(2)) * 
 rr = np.hypot(X - PIV[0], Y - PIV[1])
 syn = np.where((rr < 175)[..., None], inp, syn)
 # under the backrest the pad's top end slides along the backrest's dark underside, not the backdrop: fill with that
-topz = poly([(1380, 100), (1540, 100), (1540, 235), (1380, 235)]) & ~((lum > 150) & (Y < 150) & (X < 1415))
+# (only right of the backdrop notch: left of it, and along the headrest's lower edge above it, it is backdrop)
+topz = poly([(1428, 100), (1540, 100), (1540, 235), (1428, 235)])
 syn = np.where(topz[..., None], np.median(im[165:200, 1440:1500].reshape(-1, 3), 0), syn)
 R = cv2.GaussianBlur(cv2.dilate(pad, k(5)).astype(np.float32), (0, 0), 1.0)[..., None]
 # above the tip end the old pad edge (left in place by the cuts) is replaced too, up to the slot's edge
