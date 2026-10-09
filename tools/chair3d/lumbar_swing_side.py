@@ -13,7 +13,7 @@ from comp import studio_bg
 src, out = sys.argv[1], sys.argv[2]; os.makedirs(out, exist_ok=True)
 ANG = float(os.environ.get('ANGLE', 6)); FPS = int(os.environ.get('FPS', 24)); SEC = float(os.environ.get('SECONDS', 3))
 PIV = (1529.0, 316.0)                                                   # pivot bolt
-im = cv2.imread(src).astype(np.float32); H, W = im.shape[:2]; lum = im.mean(2); assert (W, H) == (2000, 1125)
+im = cv2.imread(src).astype(np.float32); H, W = im.shape[:2]; lum = im.mean(2); lum0 = lum.copy(); assert (W, H) == (2000, 1125)
 Y, X = np.mgrid[0:H, 0:W].astype(np.float32)
 poly = lambda pts: cv2.fillPoly(np.zeros((H, W), np.uint8), [np.array(pts, np.int32)], 1) > 0
 k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
@@ -48,13 +48,14 @@ a = cv2.GaussianBlur(pad.astype(np.float32), (0, 0), 0.9)
 pf = pad.astype(np.float32)
 ext = cv2.GaussianBlur(im * pf[..., None], (0, 0), 2.0) / np.maximum(cv2.GaussianBlur(pf, (0, 0), 2.0)[..., None], 1e-3)
 layer = np.where((pad > 0)[..., None], im, ext)
-# where the pad's edge meets the light backdrop, matte it by brightness (a soft, natural edge, no light fringe) and
-# give them the pad's own colour
+# where the pad's edge meets the light backdrop, its own anti-aliased edge pixels (already mixed with that backdrop)
+# move with it unchanged: the edge stays as sharp as in the photo
 bgl = (studio_bg(W, H)[..., ::-1] * 255).astype(np.float32)
-edge = (cv2.dilate(pad, k(2)) > 0) & (cv2.erode(pad, k(2)) == 0) & (lum > 50) & ~(tipbox & ((X > xin(Y) - 3) | (Y > 729) | ((X > 1687 + 0.737 * (Y - 681)) & (Y < 702))))
-am = np.clip((bgl.mean(2) - lum) / (bgl.mean(2) - 55.0), 0, 1)
-a = np.where(edge, am, a)
-layer = np.where(edge[..., None], ext, layer)
+edge = (cv2.dilate(pad, k(1)) > 0) & (pad == 0) & (lum > 50) & ~(tipbox & ((X > xin(Y) - 3) | (Y > 729) | ((X > 1687 + 0.737 * (Y - 681)) & (Y < 702))))
+# alpha: the pad plus that edge band, with only a half-pixel feather, so no extended pad colour bleeds out as a fringe
+a = np.where(edge, 1.0, a) * cv2.GaussianBlur(np.maximum(pad, edge.astype(np.uint8)).astype(np.float32), (0, 0), 0.5)
+a = np.where(tipbox, np.maximum(a, cv2.GaussianBlur(pad.astype(np.float32), (0, 0), 0.9) * (pad > 0)), a)
+layer = np.where(edge[..., None], im, layer)
 
 # plate behind the pad: backdrop; at the tip, the bracket's dark slot right of its upper-left edge; around the bolt (thin slivers only) inpainted from the mount and arm
 tipzone = (X > 1630) & (Y > 620) & (Y < 800)
@@ -90,11 +91,10 @@ F = cv2.GaussianBlur((seat | front).astype(np.float32), (0, 0), 0.7)[..., None]
 if os.environ.get('HI'):
     hi = cv2.imread(os.environ['HI']).astype(np.float32); H2, W2 = hi.shape[:2]; sx, sy = W2 / W, H2 / H
     up = lambda m, interp=cv2.INTER_LINEAR: cv2.resize(m, (W2, H2), interpolation=interp)
-    a = cv2.GaussianBlur(up(a), (0, 0), 0.9); F = up(F[..., 0])[..., None]; Rh = up(R[..., 0])[..., None]
-    padh = up(pad.astype(np.float32)) > 0.5
+    a = up(a); F = up(F[..., 0])[..., None]; Rh = up(R[..., 0])[..., None]
+    # the pad and its edge band take the sharp high-res pixels; only beyond them the extended pad colour
+    padh = up(np.maximum(pad, edge.astype(np.uint8)).astype(np.float32)) > 0.3
     layer = np.where(padh[..., None], hi, up(ext, cv2.INTER_CUBIC))
-    edgeh = up(edge.astype(np.float32)) > 0.5
-    layer = np.where(edgeh[..., None], up(ext, cv2.INTER_CUBIC), layer)
     plate = hi * (1 - Rh) + up(syn, cv2.INTER_CUBIC) * Rh
     im, W, H = hi, W2, H2; PIV = (PIV[0] * sx, PIV[1] * sy)
     Y, X = np.mgrid[0:H, 0:W].astype(np.float32); rr = np.hypot(X - PIV[0], Y - PIV[1])
@@ -113,7 +113,7 @@ for i in range(N):
     th = -np.radians(angle(i)) * wr                                    # clockwise on screen: lower part moves left
     c_, s_ = np.cos(th), np.sin(th)
     mx = (PIV[0] + c_ * dX - s_ * dY).astype(np.float32); my = (PIV[1] + s_ * dX + c_ * dY).astype(np.float32)
-    Lr = cv2.remap(layer, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    Lr = cv2.remap(layer, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)   # linear: no ringing at edges
     ra = cv2.remap(a, mx, my, cv2.INTER_LINEAR)[..., None]
     f = Lr * ra + plate * (1 - ra)
     f = im * F + f * (1 - F)
