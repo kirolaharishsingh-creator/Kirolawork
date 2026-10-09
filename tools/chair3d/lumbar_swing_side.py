@@ -5,12 +5,12 @@
 # Behind the pad the plate is rebuilt: the studio backdrop, and at the tip the spine bracket's dark slot inside its two
 # upper-left edge. The seat and the backrest above the pad stay in front.
 # Usage: python3 lumbar_swing_side.py still.png outdir   (still: start_frame_lumbar_studio.jpg at 2000 x 1125)
-#        env: ANGLE deg (6), FPS (24), SECONDS (2.5)
+#        env: ANGLE deg (6), FPS (24), SECONDS (3)
 import os, sys, numpy as np, cv2
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from comp import studio_bg
 src, out = sys.argv[1], sys.argv[2]; os.makedirs(out, exist_ok=True)
-ANG = float(os.environ.get('ANGLE', 6)); FPS = int(os.environ.get('FPS', 24)); SEC = float(os.environ.get('SECONDS', 2.5))
+ANG = float(os.environ.get('ANGLE', 6)); FPS = int(os.environ.get('FPS', 24)); SEC = float(os.environ.get('SECONDS', 3))
 PIV = (1529.0, 316.0)                                                   # pivot bolt
 im = cv2.imread(src).astype(np.float32); H, W = im.shape[:2]; lum = im.mean(2); assert (W, H) == (2000, 1125)
 Y, X = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -26,7 +26,10 @@ pad = (poly(PAD) & (lum < 185) & ~((X > 1640) & (Y > 640) & (lum < 20))).astype(
 pad = cv2.morphologyEx(pad, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
 # the tip: its rounded end overlaps the bracket slot, so the end is outlined by hand and joined to the thresholded
 # limb; the slot's anti-aliased edge above the end and the rib frame's rim below it are cut away
-xin = lambda y: np.polyval(np.polyfit([630, 666, 700, 757], [1730.4, 1715.6, 1701.6, 1655], 2), y)   # slot's upper-left edge
+_ey = np.arange(600, 668, 4)                                            # the spine's inner edge, measured above the tip
+_ex = np.array([1736.7, 1736.2, 1735.6, 1734.7, 1733.9, 1733.1, 1732.0, 1730.9, 1729.7, 1728.4, 1726.9, 1725.5, 1723.7,
+                1722.0, 1720.4, 1718.6, 1716.6])
+xin = lambda y: np.polyval(np.polyfit(_ey, _ex, 2), y)                 # ... and its continuation behind the tip
 TIP = [(1693, 698), (1700, 701), (1703, 706), (1706, 713), (1706, 719), (1703, 724), (1696, 728), (1685, 731),
        (1668, 731), (1660, 728), (1660, 700)]
 pad[poly(TIP)] = 1
@@ -54,11 +57,22 @@ layer = np.where(edge[..., None], ext, layer)
 
 # plate behind the pad: backdrop; at the tip, the bracket's dark slot right of its upper-left edge; around the bolt (thin slivers only) inpainted from the mount and arm
 tipzone = (X > 1630) & (Y > 620) & (Y < 800)
-dark = np.maximum(np.clip(X - xin(Y) + 0.5, 0, 1), np.clip(X + Y - 2394.5, 0, 1) * (X > 1650))[..., None]   # slot / under the tip
-syn = np.where(tipzone[..., None], np.array([7.0, 7.0, 8.0], np.float32) * dark + bg * (1 - dark), bg)
+# the spine's inner edge as shot: its shading profile across the edge, measured above the tip, laid along the edge's
+# continuation, so the uncovered part reads as the same spine surface
+_d = np.arange(-4, 24)
+_prof = np.median(np.stack([np.stack([im[y, int(round(float(xin(y)))) + d] for d in _d]) for y in range(612, 664, 2)]), 0)
+_slot = np.median(im[700:730, 1715:1735].reshape(-1, 3), 0)                # the slot's own black, right behind the tip
+_prof[12:] = _slot + (_prof[12:] - _slot) * 0                           # deep in the slot it is that black
+_prof[8:12] = _prof[8:12] * np.linspace(1, 0, 4)[:, None] + _slot * np.linspace(0, 1, 4)[:, None]
+dd = np.clip(X - xin(Y), -4, 22.999) + 4; d0 = dd.astype(int); df = (dd - d0)[..., None]
+edgefill = _prof[d0] * (1 - df) + _prof[np.clip(d0 + 1, 0, len(_d) - 1)] * df
+syn = np.where(tipzone[..., None], np.where((X - xin(Y) < -3.5)[..., None], bg, edgefill), bg)
 inp = cv2.inpaint(np.clip(im, 0, 255).astype(np.uint8), cv2.dilate(pad, k(2)) * 255, 5, cv2.INPAINT_TELEA).astype(np.float32)
 rr = np.hypot(X - PIV[0], Y - PIV[1])
 syn = np.where((rr < 175)[..., None], inp, syn)
+# under the backrest the pad's top end slides along the backrest's dark underside, not the backdrop: fill with that
+topz = poly([(1380, 100), (1540, 100), (1540, 235), (1380, 235)]) & ~((lum > 150) & (Y < 150) & (X < 1415))
+syn = np.where(topz[..., None], np.median(im[165:200, 1440:1500].reshape(-1, 3), 0), syn)
 R = cv2.GaussianBlur(cv2.dilate(pad, k(5)).astype(np.float32), (0, 0), 1.0)[..., None]
 # above the tip end the old pad edge (left in place by the cuts) is replaced too, up to the slot's edge
 R = np.maximum(R, cv2.GaussianBlur((tipbox & (X < xin(Y) + 3) & (Y < 700)).astype(np.float32), (0, 0), 1.0)[..., None])
