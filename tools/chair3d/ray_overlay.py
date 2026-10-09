@@ -7,6 +7,8 @@
 #        SWEEPS  number of sweeps between T0 and T1 (default 2: one per wave of parts leaving)
 #        WIDTH   line half-width as a fraction of the chair height (default 0.012)
 #        GAIN    brightness (default 1.0), DARK  chair threshold on 0-255 luminance (default 95)
+#        MODE    'ray' (a line sweeping across the parts) or 'outline' (a thin glowing outline traced around every
+#                part's edge while the parts separate; fades in at T0 and out at T1)
 import os, sys, subprocess, json, numpy as np
 from PIL import Image, ImageFilter
 from scipy import ndimage
@@ -16,6 +18,7 @@ T0, T1 = float(os.environ.get('T0', 0.08)), float(os.environ.get('T1', 0.80))
 SWEEPS = int(os.environ.get('SWEEPS', 2)); WIDTH = float(os.environ.get('WIDTH', 0.012))
 GAIN = float(os.environ.get('GAIN', 1.0)); DARK = float(os.environ.get('DARK', 95))
 COLOR = np.array([0.85, 0.93, 1.0], np.float32)
+MODE = os.environ.get('MODE', 'ray'); EDGE = float(os.environ.get('EDGE', 2.0))
 
 info = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries',
                                            'stream=width,height,r_frame_rate,nb_read_frames', '-of', 'json', src]))['streams'][0]
@@ -33,7 +36,32 @@ def envelope(u):
 
 for i in range(n):
     f = np.frombuffer(dec.stdout.read(w * h * 3), np.uint8).reshape(h, w, 3).astype(np.float32) / 255
-    k, p = envelope(i / max(n - 1, 1))
+    u = i / max(n - 1, 1)
+    if MODE == 'outline':
+        a = min(max((u - T0) / 0.06, 0), 1) * min(max((T1 - u) / 0.10, 0), 1)     # quick fade in, slower fade out
+        a = a * a * (3 - 2 * a) * GAIN
+        if a > 0:
+            lum = f.mean(-1) * 255
+            dark = lum < DARK
+            # chrome and bright parts: anything that stands out from the smooth backdrop (the backdrop is estimated by
+            # blurring the frame with the dark parts filled in from around them)
+            wgt = (~ndimage.binary_dilation(dark, iterations=3)).astype(np.float32)        # backdrop pixels only
+            blur = lambda x, r: np.asarray(Image.fromarray(np.clip(x * 255, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(r)), np.float32) / 255
+            ws = blur(wgt, 40)[..., None]; g = np.stack([blur(f[..., c] * wgt, 40) for c in range(3)], -1) / np.maximum(ws, 1e-3)
+            bright = ((f - g).max(-1) * 255 > 30) & ndimage.binary_dilation(dark, iterations=25)   # chrome highlights; floor shadows are darker, not brighter
+            part = ndimage.binary_opening(dark | bright, iterations=1)
+            part = ndimage.binary_fill_holes(ndimage.binary_closing(part, iterations=1))
+            lab, nl = ndimage.label(part)
+            if nl:
+                sz = ndimage.sum(part, lab, range(1, nl + 1)); part = np.isin(lab, 1 + np.nonzero(sz > 60)[0])
+            inner = ndimage.binary_erosion(part, iterations=max(1, int(round(EDGE))))
+            edge = (part & ~inner).astype(np.float32)
+            edge = np.asarray(Image.fromarray((edge * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.7)), np.float32) / 255
+            glow = np.asarray(Image.fromarray((edge * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(5)), np.float32) / 255
+            add = (edge * 1.0 + glow * 0.8)[..., None] * COLOR * a
+            f = 1 - (1 - f) * (1 - np.clip(add, 0, 1))
+        enc.stdin.write((np.clip(f, 0, 1) * 255).astype(np.uint8).tobytes()); continue
+    k, p = envelope(u)
     if k is not None:
         lum = f.mean(-1) * 255
         chair = ndimage.binary_opening(lum < DARK, iterations=1)
