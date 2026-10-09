@@ -24,24 +24,44 @@ PAD = [(1258, 330), (1281, 212), (1330, 156), (1390, 134), (1440, 144), (1485, 1
        (1650, 738), (1600, 725), (1550, 700), (1500, 670), (1450, 636), (1400, 600), (1350, 560), (1300, 505), (1262, 420)]
 pad = (poly(PAD) & (lum < 185) & ~((X > 1640) & (Y > 640) & (lum < 20))).astype(np.uint8)   # not the slot
 pad = cv2.morphologyEx(pad, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-# at the tip, the slot's anti-aliased upper-left edge above the tip and the rib frame's rim below it are not pad
-pad[(X > 1696 - 0.6 * (Y - 690) - 2) & (Y < 698) & (X > 1640)] = 0
-pad[(Y > 734) & (X > 1650)] = 0; pad[(Y > 737) & (X > 1620)] = 0
-# the tip's rounded end itself (it overlaps the slot, so it is outlined rather than thresholded)
-pad[poly([(1640, 660), (1665, 667), (1682, 677), (1694, 689), (1703, 701), (1707, 713), (1704, 722), (1696, 729),
-          (1680, 731), (1640, 734)])] = 1
+# the tip: its rounded end overlaps the bracket slot, so the end is outlined by hand and joined to the thresholded
+# limb; the slot's anti-aliased edge above the end and the rib frame's rim below it are cut away
+xin = lambda y: np.polyval(np.polyfit([630, 666, 700, 757], [1730.4, 1715.6, 1701.6, 1655], 2), y)   # slot's upper-left edge
+TIP = [(1693, 698), (1700, 701), (1703, 706), (1706, 713), (1706, 719), (1703, 724), (1696, 728), (1685, 731),
+       (1668, 731), (1660, 728), (1660, 700)]
+pad[poly(TIP)] = 1
+pad[(X > xin(Y) - 4) & (Y < 697) & (X > 1675)] = 0
+pad[(X > 1688 + 0.737 * (Y - 681)) & (Y < 700) & (Y > 660)] = 0        # the end's upper edge (1686,681)-(1700,700)
+pad[(Y > 732) & (X > 1655)] = 0; pad[(X + Y > 2392) & (X > 1600) & (X <= 1655)] = 0
+tipbox = poly([(1630, 640), (1720, 640), (1720, 750), (1630, 750)])
+sm = cv2.morphologyEx(cv2.morphologyEx(pad, cv2.MORPH_OPEN, k(3)), cv2.MORPH_CLOSE, k(3))
+pad[tipbox] = sm[tipbox]
+pad[(X > 1687 + 0.737 * (Y - 681)) & (Y < 700) & (Y > 660)] = 0        # again after smoothing: no knob
 n, lab, st, _ = cv2.connectedComponentsWithStats(pad); pad = (lab == 1 + np.argmax(st[1:, 4])).astype(np.uint8)
-a = cv2.GaussianBlur(pad.astype(np.float32), (0, 0), 0.7)
+a = cv2.GaussianBlur(pad.astype(np.float32), (0, 0), 0.9)
+# the moving layer: the pad's own colours carried a few pixels past its outline, so its soft edge never drags along
+# what lay next to it (the slot's black at the tip, the frame's rim below it)
+pf = pad.astype(np.float32)
+ext = cv2.GaussianBlur(im * pf[..., None], (0, 0), 2.0) / np.maximum(cv2.GaussianBlur(pf, (0, 0), 2.0)[..., None], 1e-3)
+layer = np.where((pad > 0)[..., None], im, ext)
+# where the pad's edge meets the light backdrop, matte it by brightness (a soft, natural edge, no light fringe) and
+# give them the pad's own colour
+bgl = (studio_bg(W, H)[..., ::-1] * 255).astype(np.float32)
+edge = (cv2.dilate(pad, k(2)) > 0) & (cv2.erode(pad, k(2)) == 0) & (lum > 50) & ~(tipbox & ((X > xin(Y) - 3) | (Y > 729) | ((X > 1687 + 0.737 * (Y - 681)) & (Y < 702))))
+am = np.clip((bgl.mean(2) - lum) / (bgl.mean(2) - 55.0), 0, 1)
+a = np.where(edge, am, a)
+layer = np.where(edge[..., None], ext, layer)
 
 # plate behind the pad: backdrop; at the tip, the bracket's dark slot right of its upper-left edge; around the bolt (thin slivers only) inpainted from the mount and arm
-xin = lambda y: 1702 - 0.6 * (y - 690)                                 # slot's upper-left edge (1736,632)..(1655,757)
 tipzone = (X > 1630) & (Y > 620) & (Y < 800)
-dark = np.clip(xin(Y) - X + 0.5, 0, 1)[..., None] * 0 + np.clip(X - xin(Y) + 0.5, 0, 1)[..., None]
+dark = np.maximum(np.clip(X - xin(Y) + 0.5, 0, 1), np.clip(X + Y - 2394.5, 0, 1) * (X > 1650))[..., None]   # slot / under the tip
 syn = np.where(tipzone[..., None], np.array([7.0, 7.0, 8.0], np.float32) * dark + bg * (1 - dark), bg)
 inp = cv2.inpaint(np.clip(im, 0, 255).astype(np.uint8), cv2.dilate(pad, k(2)) * 255, 5, cv2.INPAINT_TELEA).astype(np.float32)
 rr = np.hypot(X - PIV[0], Y - PIV[1])
 syn = np.where((rr < 175)[..., None], inp, syn)
-R = cv2.GaussianBlur(cv2.dilate(pad, k(3)).astype(np.float32), (0, 0), 1.0)[..., None]
+R = cv2.GaussianBlur(cv2.dilate(pad, k(5)).astype(np.float32), (0, 0), 1.0)[..., None]
+# above the tip end the old pad edge (left in place by the cuts) is replaced too, up to the slot's edge
+R = np.maximum(R, cv2.GaussianBlur((tipbox & (X < xin(Y) + 3) & (Y < 700)).astype(np.float32), (0, 0), 1.0)[..., None])
 plate = im * (1 - R) + syn * R
 # in front of the pad: the seat (black fabric below the gap) and the backrest piece above the pad's top end
 seat = poly([(1100, 520), (1350, 565), (1400, 605), (1450, 641), (1500, 676), (1550, 706), (1600, 731), (1640, 760),
@@ -63,7 +83,7 @@ for i in range(N):
     th = -np.radians(angle(i)) * wr                                    # clockwise on screen: lower part moves left
     c_, s_ = np.cos(th), np.sin(th)
     mx = (PIV[0] + c_ * dX - s_ * dY).astype(np.float32); my = (PIV[1] + s_ * dX + c_ * dY).astype(np.float32)
-    Lr = cv2.remap(im, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    Lr = cv2.remap(layer, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
     ra = cv2.remap(a, mx, my, cv2.INTER_LINEAR)[..., None]
     f = Lr * ra + plate * (1 - ra)
     f = im * F + f * (1 - F)
