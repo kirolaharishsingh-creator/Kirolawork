@@ -147,7 +147,7 @@ area('rim', (-2.2, 0.6, 1.8), 450, 1.5)
 bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 0, FLOOR0)); floor = bpy.context.object
 floor.is_shadow_catcher = True; floor.visible_glossy = False
 
-cam = bpy.data.cameras.new('cam'); cam.lens = 50
+cam = bpy.data.cameras.new('cam'); cam.lens = float(os.environ.get('LENS', 50))
 camo = bpy.data.objects.new('cam', cam); sc.collection.objects.link(camo); sc.camera = camo
 AZ = math.radians(float(os.environ.get('CAM_AZ', 38)))     # a little off straight-front
 EL = math.radians(float(os.environ.get('CAM_EL', 10)))
@@ -190,6 +190,7 @@ if MODE == 'parts':
     sys.exit()
 
 for _n in filter(None, os.environ.get('HIDE', '').split(',')): objs[_n].hide_render = True    # debugging aid
+if os.environ.get('NOFLOOR') == '1': floor.hide_render = True                              # outline-only renders
 if os.environ.get('RAYPIX'):             # debugging aid: which part / model point sits at (or around) these pixels
     pose(int(os.environ.get('FRAMES', '0').split(',')[0])); dg = bpy.context.evaluated_depsgraph_get()
     fr_ = [camo.matrix_world @ c for c in cam.view_frame(scene=sc)]       # corners: tr, br, bl, tl
