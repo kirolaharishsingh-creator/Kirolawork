@@ -156,6 +156,7 @@ D0, D1 = float(os.environ.get('D0', 3.1)), float(os.environ.get('D1', 7.0))
 # lumbar movement: pivot point of the lumbar pad (model coords before R, where its arm meets the spine); the mesh is moved so
 # its origin sits on the pivot and pose() rotates it there
 LUMB_TILT = float(os.environ.get('LUMB_TILT', 0))
+SEAT_SLIDE = float(os.environ.get('SEAT_SLIDE', 0))      # seat slider travel in metres
 if LUMB_TILT:
     _p = [float(x) for x in os.environ.get('LUMB_PIVOT', '0.016,0.21,0.50').split(',')]
     _p = R @ mathutils.Vector(_p); LUMB_P = (_p[0] - hub[0], _p[1] - hub[1], _p[2]); objs['lumbar'].data.transform(mathutils.Matrix.Translation([-c for c in LUMB_P]))
@@ -174,6 +175,8 @@ def pose(f):
     e = smooth((u - T_OUT + 0.03) / (T_HOLD - T_OUT)) * (1 - smooth((u - T_BACK) / (T_END - T_BACK + 0.03)))
     if not EXPLODE: e = 0.0
     floor.location.z = FLOOR0 - WHEEL_DROP * amount(7, u)
+    if SEAT_SLIDE:           # USP seat slider: the seat cushion glides forward and back (depth adjustment), one cycle per loop
+        objs['seat'].location = (SEAT_SLIDE * 0.5 * (1 - math.cos(2 * math.pi * u)), 0, 0)    # +x is the chair's front after R
     if LUMB_TILT:            # USP lumbar shot: the lumbar pad rocks on its pivot rod (about the x axis), one cycle per loop
         lo_ = objs['lumbar']; lo_.location = LUMB_P        # (plain turntable mode: no explode offset)
         lo_.rotation_euler = (0, math.radians(LUMB_TILT) * math.sin(2 * math.pi * u), 0)   # model x axis is y after R
