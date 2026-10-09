@@ -57,9 +57,39 @@ if os.environ.get('PANEL_JSON'):
     import bmesh as _b2
     dg = bpy.context.evaluated_depsgraph_get(); fm = bpy.data.meshes.new_from_object(fo.evaluated_get(dg)); fo2 = bpy.data.objects.new('frame', fm)
     sc.collection.objects.link(fo2); bpy.data.objects.remove(fo)
-    fl = float(os.environ.get('RIM_FLAT', 0.7))
+    fl = float(os.environ.get('RIM_FLAT', 0.5))
     for vx in fm.vertices: ys = surf(vx.co.x, vx.co.z); vx.co.y = ys + (vx.co.y - ys) * fl
     fm.polygons.foreach_set('use_smooth', np.ones(len(fm.polygons), bool)); fm.update()
+    # the frame in the photos is a deep matte black (fabric-wrapped), not the grey sheen of plain plastic
+    rm = bpy.data.materials.new('rim_black'); rm.use_nodes = True; rp = rm.node_tree.nodes['Principled BSDF']
+    rp.inputs['Base Color'].default_value = (0.0015, 0.0015, 0.0018, 1); rp.inputs['Roughness'].default_value = float(os.environ.get('RIM_ROUGH', 0.6))
+    rp.inputs['Specular IOR Level'].default_value = 0.08
+    fm.materials.clear(); fm.materials.append(rm)
+    if os.environ.get('YFRAME', '0') == '1':
+        # the black Y-frame seen through the mesh in the photos: two straps from the top corners converging at the
+        # bottom centre, plus the tongue at the top centre. Drawn from the front photo (15.jpg, backrest box
+        # x 345..768, y 505..870 px) as an alpha mask on a black sheet just behind the mesh.
+        from PIL import Image as _I, ImageDraw as _D
+        R = 2048; im = _I.new('L', (R, R), 0); dr = _D.Draw(im)
+        px = lambda pts: [((x - 345) / 423 * R, (y - 505) / 365 * R) for x, y in pts]
+        L = [(362, 538), (428, 538), (556, 842), (556, 880), (498, 880)]
+        dr.polygon(px(L), 255); dr.polygon(px([(2 * 556 - x, y) for x, y in L]), 255)
+        dr.polygon(px([(500, 500), (612, 500), (580, 560), (532, 560)]), 255)
+        dr.polygon(px([(534, 500), (578, 500), (578, 596), (534, 596)]), 255)
+        (a, b), (c, d) = px([(534, 574), (578, 618)]); dr.ellipse([a, b, c, d], 255)
+        im = im.resize((1024, 1024), _I.LANCZOS); im = _I.eval(im, lambda q: 255 - q) if os.environ.get('YF_INV', '1') == '1' else im; mpth = os.path.join(os.getcwd(), 'yframe_mask.png'); im.save(mpth)
+        me2 = me.copy(); yf = bpy.data.objects.new('yframe', me2); sc.collection.objects.link(yf)
+        yf.location.y = float(os.environ.get('YF_BACK', 0.011)); me2.materials.clear()
+        x0, x1, z0, z1 = O[:, 0].min(), O[:, 0].max(), O[:, 1].min(), O[:, 1].max()
+        me2.uv_layers.remove(me2.uv_layers['mesh_uv']) if 'mesh_uv' in me2.uv_layers else None
+        me2.uv_layers.new(name='yf_uv').data.foreach_set('uv', np.c_[(pp[:, 0] - x0) / (x1 - x0), (pp[:, 2] - z0) / (z1 - z0)].astype(np.float32).ravel())
+        ym = bpy.data.materials.new('yframe'); ym.use_nodes = True; yn = ym.node_tree; yp = yn.nodes['Principled BSDF']
+        yp.inputs['Base Color'].default_value = (0.012, 0.012, 0.013, 1); yp.inputs['Roughness'].default_value = 0.5
+        yp.inputs['Specular IOR Level'].default_value = 0.3
+        tx = yn.nodes.new('ShaderNodeTexImage'); tx.image = bpy.data.images.load(mpth); tx.image.colorspace_settings.name = 'Non-Color'
+        uvn = yn.nodes.new('ShaderNodeUVMap'); uvn.uv_map = 'yf_uv'; yn.links.new(uvn.outputs[0], tx.inputs[0])
+        yn.links.new(tx.outputs['Color'], yp.inputs['Alpha']); me2.materials.append(ym)
+        yf.modifiers.new('sd', 'SOLIDIFY').thickness = 0.008
     bpy.data.objects.remove(br); br = mp
     print('clean panel built:', len(me.polygons), 'mesh faces, frame tube', len(mid), 'pts')
 v = np.array([br.matrix_world @ x.co for x in br.data.vertices]); lo, hi = v.min(0), v.max(0); C = (lo + hi) / 2
