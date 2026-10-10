@@ -43,6 +43,7 @@ ASM = {  # part -> (arrival slot, start offset in metres: x forward, y lateral, 
 A_START, A_GAP, A_FLY = float(os.environ.get('A_START', 0.04)), float(os.environ.get('A_GAP', 0.072)), float(os.environ.get('A_FLY', 0.11))
 A_ARC = math.radians(float(os.environ.get('A_ARC', 35)))     # chair turns this much into its final angle
 A_D0, A_D1 = float(os.environ.get('A_D0', 3.3)), float(os.environ.get('A_D1', 2.6))   # camera distance: slow push-in
+A_CAMEND = float(os.environ.get('A_CAMEND', 0.92))     # camera arc/push-in finished at this fraction (then locked, e.g. to dissolve into a photo)
 
 def ease_out(u):
     u = min(max(u, 0.0), 1.0); return 1 - (1 - u) ** 3
@@ -201,7 +202,7 @@ def pose(f):
         lo_.rotation_euler = (0, math.radians(LUMB_TILT) * math.sin(2 * math.pi * u), 0)   # model x axis is y after R
     if ASSEMBLE:
         floor.location.z = FLOOR0
-        pivot.rotation_euler = (0, 0, -A_ARC * (1 - smooth(u / 0.85)))
+        pivot.rotation_euler = (0, 0, -A_ARC * (1 - smooth(u / A_CAMEND)))
         for n, (slot, off) in ASM.items():
             k = 1 - arrive(slot, u); objs[n].location = (off[0] * k, off[1] * k, off[2] * k)
             objs[n].hide_render = u < A_START + slot * A_GAP     # not in the scene (no stray shadow) before its flight
@@ -211,7 +212,7 @@ def pose(f):
             objs['wheel%d' % i].hide_render = u < A_START
             objs['wheel%d' % i]['glow'] = 0.0; objs['wheel%d' % i]['sweep'] = 1.06; objs['wheel%d' % i]['ray'] = 0.0
         global D0, D1
-        D0, D1 = A_D0, A_D1; e = smooth(u / 0.92)
+        D0, D1 = A_D0, A_D1; e = smooth(u / A_CAMEND)
     camera_at(e)
     bpy.context.view_layer.update()
 
