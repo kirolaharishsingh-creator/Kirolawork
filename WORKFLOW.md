@@ -97,12 +97,16 @@ Encode: H.264, CRF 14, preset slow, yuv420p, `+faststart`, 30 fps, no audio. Lig
 3. Cut each to ≈3 s, join with light-sweep transitions and shared backdrop gain (`tools/assemble_anatomy.py`; whip pans: `assemble_whip.py`, `join_whip.py`).
 4. Check every cut for colour jumps; total 26 s at 30 fps.
 
-## Assembly / exploded video
+## Assembly video (approved style: parts fly in and build the product, 8–10 s)
+
+The client rejected the explode-and-return loop; they want parts **coming in and forming the chair**, ending on the real product.
 
 1. 3D model (Tripo or client file) → clean in Blender (`tools/chair3d/tripo_fix.py`, `fix_m*.py`, part map `parts.py`, `partsheet.py`).
-2. Option A — pure 3D: `anim3.py` (explode → hold → reassemble, turntable, `DURATION`, `EXPLODE`, `LENS`), composite with `comp.py` on `studio_bg`.
-3. Option B — Kling: start = real photo on backdrop, end = 3D exploded render matched to the same angle; Kling interpolates; add the thin light outline with `ray_overlay.py`.
-4. Loop: forward + reverse, seamless.
+2. Render the build with `anim3.py` in assembly mode: `ASSEMBLE=1 EXPLODE=0 DURATION=9 A_D1=2.85 CAM_Z=-0.03 A_CAMEND=0.74 RES=1920 SAMPLES=16`. Parts arrive in build order (base + castors, gas lift, mechanism, seat, spine, backrest, lumbar, armrests, headrest); the camera arcs and pushes in and stops when the last part lands. Order, directions and timing: `ASM`, `A_START`, `A_GAP`, `A_FLY`, `A_ARC`.
+3. **Always render previews at full resolution or ≥ 16 samples to judge quality.** Pitfall: an 8-sample 640 px preview showed blocky grey denoiser patches that were not in the model.
+4. Finish on the real photo: `tools/chair3d/assembly_to_photo.py frames photo.png out.mp4` fits the render onto the real product photo (ECC on silhouettes), cleans model flaws per frame (pin-holes, thin rim spikes, bright specks, upper chair only), dissolves the finished 3D chair into the photo (`D0`/`D1`) and holds the photo. The photo must already be on the studio backdrop and shot from the same angle as the final camera.
+5. Render time ≈ 60 s per 1080p frame; background jobs stop at 2 h, so split the frame range (`F0`/`F1`). Frames after the camera stops are identical — render one and copy it.
+6. Higgsfield "Exploded View Loop" (Marketing Studio → Motion) is an AI alternative; its cost is not exposed through the API and was above 18.58 credits.
 
 ## Delivery checklist (per video)
 
