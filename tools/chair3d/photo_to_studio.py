@@ -33,7 +33,7 @@ big = ndimage.binary_dilation(np.isin(lab, 1 + np.nonzero(sz > core.size * 0.002
 keep = ndimage.binary_erosion(big, iterations=8) & ndimage.binary_dilation(dev, iterations=10)   # chrome and its streaks
 a = np.maximum(a, blur(keep.astype(np.float32), 2))
 a = (a * blur(big.astype(np.float32), 3))[..., None]
-bg = studio_bg(W, H).astype(np.float32)
+bg = np.ones((H, W, 3), np.float32) if os.environ.get('BG') == 'white' else studio_bg(W, H).astype(np.float32)   # BG=white: product cut-out (e.g. Tripo input)
 out = f * a + bg * (1 - a)
 chair = a[..., 0] > 0.5
 Image.fromarray((out * 255 + 0.5).astype(np.uint8)).save(dst, quality=95)
