@@ -28,9 +28,27 @@ T = cv2.remap(big, mapx.astype(np.float32), mapy.astype(np.float32), cv2.INTER_L
 mesh = (cv2.blur(g, (31, 31)) > 45).astype(np.float32)
 lowT = cv2.GaussianBlur(img * mesh[..., None], (0, 0), 60) / (cv2.GaussianBlur(mesh, (0, 0), 60)[..., None] + 1e-3)
 T = T / (tile.reshape(-1, 3).mean(0) + 1e-3) * lowT
-WINDOW = [(395, 282), (1565, 292), (1697, 402), (1702, 1000), (1748, 1600), (1705, 1700), (1300, 1712), (840, 1800),
-          (480, 1800), (410, 950), (330, 560)]
-win = np.zeros((H, W), np.uint8); cv2.fillPoly(win, [np.int32(WINDOW)], 255); win = cv2.erode(win, np.ones((5, 5), np.uint8))
-a = cv2.GaussianBlur(win.astype(np.float32) / 255, (0, 0), 2.0)[..., None]
-out = img * (1 - a) + T * a
+# mesh opening = the original mesh areas joined across the V (closing with a large disk), so its corners and edges
+# are the original's; only the V bands between them change
+from scipy import ndimage
+obj = ndimage.binary_fill_holes(cv2.morphologyEx((g < 200).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8)))
+obj = cv2.erode(obj.astype(np.uint8), np.ones((61, 61), np.uint8)) > 0               # inside the frame's outer edge
+bm = cv2.blur(g, (21, 21)); m0 = ((bm > 40) & (bm < 150) & obj).astype(np.uint8)
+m0 = cv2.morphologyEx(m0, cv2.MORPH_OPEN, np.ones((9, 9), np.uint8))
+win = cv2.morphologyEx(m0, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (301, 301)))
+from scipy import ndimage
+win = ndimage.binary_fill_holes(win).astype(np.uint8)
+n_, lab_, st_, _ = cv2.connectedComponentsWithStats(win); win = (lab_ == 1 + np.argmax(st_[1:, 4])).astype(np.uint8)
+cnt = max(cv2.findContours(win, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0], key=cv2.contourArea)
+win = np.zeros((H, W), np.uint8); cv2.fillPoly(win, [cv2.convexHull(cnt)], 1)          # one clean opening, no notches
+RC = 70; win = cv2.morphologyEx(win, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * RC + 1, 2 * RC + 1)))
+win = cv2.GaussianBlur(win.astype(np.float32), (0, 0), 3); win = (win > 0.5).astype(np.uint8) * 255
+win = cv2.erode(win, np.ones((3, 3), np.uint8))
+a = cv2.GaussianBlur(win.astype(np.float32) / 255, (0, 0), 1.6)[..., None]
+# soft shadow where the mesh tucks under the frame
+dist = cv2.distanceTransform(win, cv2.DIST_L2, 5)
+lip = (1 - 0.45 * np.exp(-dist / 7.0))[..., None]
+T = T * lip
+base = img
+out = base * (1 - a) + T * a
 cv2.imwrite(dst, np.clip(out, 0, 255).astype(np.uint8)); print('ok', dst)
