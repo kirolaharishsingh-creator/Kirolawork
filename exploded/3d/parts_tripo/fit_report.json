@@ -1,0 +1,51 @@
+{
+ "seat": {
+  "init_err_mm": 30.9,
+  "final_err_mm": 17.8,
+  "scale": 0.3806,
+  "mirrored": false,
+  "faces": 200000
+ },
+ "backrest": {
+  "init_err_mm": 16.8,
+  "final_err_mm": 8.2,
+  "scale": 0.2917,
+  "mirrored": false,
+  "faces": 200000
+ },
+ "frame": {
+  "init_err_mm": 38.1,
+  "final_err_mm": 21.6,
+  "scale": 0.5227,
+  "mirrored": false,
+  "faces": 200000
+ },
+ "lumbar": {
+  "init_err_mm": 39.4,
+  "final_err_mm": 26.7,
+  "scale": 0.2063,
+  "mirrored": false,
+  "faces": 200000
+ },
+ "arm_r": {
+  "init_err_mm": 22.9,
+  "final_err_mm": 15.6,
+  "scale": 0.2373,
+  "mirrored": true,
+  "faces": 200000
+ },
+ "arm_l": {
+  "init_err_mm": 34.6,
+  "final_err_mm": 15.0,
+  "scale": 0.2318,
+  "mirrored": false,
+  "faces": 200000
+ },
+ "base": {
+  "init_err_mm": 44.5,
+  "final_err_mm": 21.7,
+  "scale": 0.4939,
+  "mirrored": false,
+  "faces": 199999
+ }
+}

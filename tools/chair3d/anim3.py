@@ -85,7 +85,7 @@ def tripo_colour(m):
 
 mats = {m for o in objs.values() for m in o.data.materials}
 for m in mats:
-    if m.name.endswith('fabric') or m.name == 'frame_plastic': continue
+    if m.name.endswith('fabric') or m.name == 'frame_plastic' or m.name.startswith('tp_'): continue   # tp_*: prepared Tripo parts
     tripo_colour(m)
 
 def add_glow(m):
