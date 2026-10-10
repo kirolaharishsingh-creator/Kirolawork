@@ -31,6 +31,25 @@ T_OUT, T_HOLD, T_BACK, T_END = 0.10, 0.32, 0.68, 0.90
 STAG = 0.012                                # stagger between parts (fraction of the clip)
 FLOOR0 = -0.4904
 
+# ASSEMBLE=1 (assembly video): the empty studio, then each part flies in from off-frame and lands in place in build
+# order (base + wheels, gas lift, mechanism, seat, spine, backrest, lumbar, armrests, headrest) while the camera eases
+# through a short arc onto the product-photo angle; the finished chair holds at the end. Not a loop.
+ASSEMBLE = os.environ.get('ASSEMBLE') == '1'
+ASM = {  # part -> (arrival slot, start offset in metres: x forward, y lateral, z up)
+    'base': (0, (0.0, 0.0, 1.6)), 'gas_lift': (1, (0.0, 0.0, 1.6)), 'mechanism': (2, (0.0, 0.0, 1.5)),
+    'seat': (3, (1.6, 0.0, 0.25)), 'frame': (4, (-1.6, 0.0, 0.3)), 'backrest': (5, (-1.2, 0.0, 1.1)),
+    'lumbar': (6, (0.0, -1.7, 0.1)), 'arm_r': (7, (0.0, 1.7, 0.1)), 'arm_l': (7, (0.0, -1.7, 0.1)),
+    'headrest': (8, (0.0, 0.0, 1.5))}
+A_START, A_GAP, A_FLY = float(os.environ.get('A_START', 0.04)), float(os.environ.get('A_GAP', 0.072)), float(os.environ.get('A_FLY', 0.11))
+A_ARC = math.radians(float(os.environ.get('A_ARC', 35)))     # chair turns this much into its final angle
+A_D0, A_D1 = float(os.environ.get('A_D0', 3.3)), float(os.environ.get('A_D1', 2.6))   # camera distance: slow push-in
+
+def ease_out(u):
+    u = min(max(u, 0.0), 1.0); return 1 - (1 - u) ** 3
+
+def arrive(slot, u):        # 0 = off-frame, 1 = landed
+    return ease_out((u - (A_START + slot * A_GAP)) / A_FLY)
+
 def smooth(u):
     u = min(max(u, 0.0), 1.0); return u * u * (3 - 2 * u)
 
@@ -180,6 +199,19 @@ def pose(f):
     if LUMB_TILT:            # USP lumbar shot: the lumbar pad rocks on its pivot rod (about the x axis), one cycle per loop
         lo_ = objs['lumbar']; lo_.location = LUMB_P        # (plain turntable mode: no explode offset)
         lo_.rotation_euler = (0, math.radians(LUMB_TILT) * math.sin(2 * math.pi * u), 0)   # model x axis is y after R
+    if ASSEMBLE:
+        floor.location.z = FLOOR0
+        pivot.rotation_euler = (0, 0, -A_ARC * (1 - smooth(u / 0.85)))
+        for n, (slot, off) in ASM.items():
+            k = 1 - arrive(slot, u); objs[n].location = (off[0] * k, off[1] * k, off[2] * k)
+            objs[n].hide_render = u < A_START + slot * A_GAP     # not in the scene (no stray shadow) before its flight
+            objs[n]['glow'] = 0.0; objs[n]['sweep'] = 1.06; objs[n]['ray'] = 0.0
+        for i in range(5):    # wheels land with the base
+            k = 1 - arrive(0, u); objs['wheel%d' % i].location = (0, 0, ASM['base'][1][2] * k)
+            objs['wheel%d' % i].hide_render = u < A_START
+            objs['wheel%d' % i]['glow'] = 0.0; objs['wheel%d' % i]['sweep'] = 1.06; objs['wheel%d' % i]['ray'] = 0.0
+        global D0, D1
+        D0, D1 = A_D0, A_D1; e = smooth(u / 0.92)
     camera_at(e)
     bpy.context.view_layer.update()
 
