@@ -69,7 +69,10 @@ def dither(f): return f + rng.uniform(-0.6, 0.6, f.shape[:2])[..., None]   # bre
 REVEAL = os.environ.get('REVEAL', 'sweep')
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
 chair_ph = (ph.mean(2) < 110)
-ys_, xs_ = np.where(chair_ph); X0, X1 = xs_.min() - 120, xs_.max() + 120
+ys_, xs_ = np.where(chair_ph)
+rl = cv2.warpAffine(cv2.imread(files[-1], cv2.IMREAD_UNCHANGED)[..., 3], A, (W, H))     # last render's footprint too,
+_, xr = np.where(rl > 20)                                                               # so no 3D part is left behind
+X0, X1 = min(xs_.min(), xr.min()) - 120, max(xs_.max(), xr.max()) + 160
 coord = xx + 0.30 * (yy - H / 2)                  # leaning band
 BAND = float(os.environ.get('BAND', 70))
 for i in range(TOTAL):
