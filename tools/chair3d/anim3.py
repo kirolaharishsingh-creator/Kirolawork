@@ -35,6 +35,7 @@ FLOOR0 = -0.4904
 # order (base + wheels, gas lift, mechanism, seat, spine, backrest, lumbar, armrests, headrest) while the camera eases
 # through a short arc onto the product-photo angle; the finished chair holds at the end. Not a loop.
 ASSEMBLE = os.environ.get('ASSEMBLE') == '1'
+_HIDE = set(filter(None, os.environ.get('HIDE', '').split(',')))
 ASM = {  # part -> (arrival slot, start offset in metres: x forward, y lateral, z up)
     'base': (0, (0.0, 0.0, 1.6)), 'gas_lift': (1, (0.0, 0.0, 1.6)), 'mechanism': (2, (0.0, 0.0, 1.5)),
     'seat': (3, (1.6, 0.0, 0.25)), 'frame': (4, (-1.6, 0.0, 0.3)), 'backrest': (5, (-1.2, 0.0, 1.1)),
@@ -205,16 +206,53 @@ def pose(f):
         pivot.rotation_euler = (0, 0, -A_ARC * (1 - smooth(u / A_CAMEND)))
         for n, (slot, off) in ASM.items():
             k = 1 - arrive(slot, u); objs[n].location = (off[0] * k, off[1] * k, off[2] * k)
-            objs[n].hide_render = u < A_START + slot * A_GAP     # not in the scene (no stray shadow) before its flight
+            objs[n].hide_render = u < A_START + slot * A_GAP or n in _HIDE     # not in the scene (no stray shadow) before its flight
             objs[n]['glow'] = 0.0; objs[n]['sweep'] = 1.06; objs[n]['ray'] = 0.0
         for i in range(5):    # wheels land with the base
             k = 1 - arrive(0, u); objs['wheel%d' % i].location = (0, 0, ASM['base'][1][2] * k)
-            objs['wheel%d' % i].hide_render = u < A_START
+            objs['wheel%d' % i].hide_render = u < A_START or 'wheel%d' % i in _HIDE
             objs['wheel%d' % i]['glow'] = 0.0; objs['wheel%d' % i]['sweep'] = 1.06; objs['wheel%d' % i]['ray'] = 0.0
         global D0, D1
         D0, D1 = A_D0, A_D1; e = smooth(u / A_CAMEND)
     camera_at(e)
     bpy.context.view_layer.update()
+
+BASE_ROT = math.radians(float(os.environ.get('BASE_ROT', 0)))   # turn the five-star base + castors (chairs swivel on it)
+if BASE_ROT:
+    for _n in ['base'] + ['wheel%d' % i for i in range(5)]: objs[_n].rotation_mode = 'XYZ'; objs[_n].rotation_euler = (0, 0, BASE_ROT)
+
+if MODE == 'fit':        # find camera azimuth/elevation and base turn that best match a photo's chair silhouette
+    import itertools
+    ph = np.asarray(bpy.data.images.load(os.environ['FIT_PHOTO']).pixels[:], np.float32)
+    FW = int(os.environ.get('FIT_W', 384)); FH = FW * 9 // 16
+    src = bpy.data.images.load(os.environ['FIT_PHOTO']); src.scale(FW, FH)
+    px = np.asarray(src.pixels[:], np.float32).reshape(FH, FW, 4)[::-1, :, :3]
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); from comp import studio_bg
+    target = px.mean(2) < float(os.environ.get('FIT_T', 0.4))    # black parts incl. castors (chrome and floor shadow excluded)
+    from scipy import ndimage
+    target = ndimage.binary_opening(target, iterations=1)
+    sc.render.resolution_x, sc.render.resolution_y = FW, FH; sc.cycles.samples = 1; floor.hide_render = True
+    sc.render.image_settings.color_mode = 'RGBA'
+    pose(N)
+    def sil():
+        global _k; _k = globals().get('_k', 0) + 1; fp = f'{os.getcwd()}/fit_{_k:03d}.png'
+        sc.render.filepath = fp; bpy.ops.render.render(write_still=True)
+        im = bpy.data.images.load(fp, check_existing=False); a = np.asarray(im.pixels[:], np.float32).reshape(FH, FW, 4)[::-1]
+        bpy.data.images.remove(im); return (a[..., 3] > 0.5) & (a[..., :3].mean(2) < float(os.environ.get('FIT_T', 0.4)))
+    def iou_shift(m):     # best IoU over translation + scale (photo framing differs), via bounding boxes
+        ys, xs = np.where(m); yt, xt = np.where(target)
+        if len(ys) < 50: return 0
+        s = (yt.max() - yt.min()) / max(ys.max() - ys.min(), 1)
+        from scipy import ndimage   # output pixel y,x samples m at ((y - ty)/s, (x - tx)/s)
+        ty, tx = yt.min() - s * ys.min(), xt.min() - s * xs.min()
+        w = ndimage.affine_transform(m.astype(np.float32), [1 / s, 1 / s], offset=[-ty / s, -tx / s], order=0) > 0.5
+        return (w & target).sum() / max((w | target).sum(), 1)
+    best = []
+    for az, el, br in itertools.product(*[[float(v) for v in os.environ[k].split(',')] for k in ('FIT_AZ', 'FIT_EL', 'FIT_BR')]):
+        AZ, EL = math.radians(az), math.radians(el)
+        for _n in ['base'] + ['wheel%d' % i for i in range(5)]: objs[_n].rotation_mode = 'XYZ'; objs[_n].rotation_euler = (0, 0, math.radians(br))
+        pose(N); v = iou_shift(sil()); best.append((v, az, el, br)); print('FIT', round(v, 4), az, el, br, flush=True)
+    best.sort(reverse=True); print('BEST', best[:5]); sys.exit()
 
 if MODE == 'parts':
     pose(0); floor.hide_render = True

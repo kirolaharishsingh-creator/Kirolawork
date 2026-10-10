@@ -49,7 +49,7 @@ def clean(r):              # model flaws: see-through pin-holes, thin dark spike
     return r
 
 def render_frame(i):      # render RGBA warped into photo coords, over the studio backdrop
-    r = clean(cv2.imread(files[i], cv2.IMREAD_UNCHANGED)).astype(np.float32)
+    r = clean(cv2.imread(files[min(i, len(files) - 1)], cv2.IMREAD_UNCHANGED)).astype(np.float32)   # chair is still after the last render
     r = cv2.warpAffine(r, A, (W, H), flags=cv2.INTER_LANCZOS4, borderValue=(0, 0, 0, 0))   # render pixel x -> A x
     a = np.clip(r[..., 3:] / 255, 0, 1)
     return r[..., :3] * a + bg * (1 - a)
@@ -58,11 +58,34 @@ p = subprocess.Popen(['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt
                       '-i', '-', '-an', '-c:v', 'libx264', '-crf', '14', '-preset', 'slow', '-pix_fmt', 'yuv420p',
                       '-movflags', '+faststart', out], stdin=subprocess.PIPE)
 ph = photo.astype(np.float32)
+# the photo's flat backdrop shows 8-bit banding rings: keep the chair and its floor shadow, take the backdrop from studio_bg
+dev = cv2.GaussianBlur(np.abs(ph - bg).max(2), (0, 0), 1.5)
+keep = np.clip((dev - 3.0) / 7.0, 0, 1); keep = (keep * keep * (3 - 2 * keep))[..., None]   # rings (1-4 levels) -> backdrop
+ph = ph * keep + bg * (1 - keep)
+rng = np.random.default_rng(0)
+def dither(f): return f + rng.uniform(-0.6, 0.6, f.shape[:2])[..., None]   # breaks up gradient banding in the encode
+# REVEAL=sweep (default): a soft diagonal light band crosses the chair; behind it the real photo, ahead of it the 3D
+# render, so small shape differences between model and product are hidden by the moving light. REVEAL=dissolve: crossfade.
+REVEAL = os.environ.get('REVEAL', 'sweep')
+yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+chair_ph = (ph.mean(2) < 110)
+ys_, xs_ = np.where(chair_ph); X0, X1 = xs_.min() - 120, xs_.max() + 120
+coord = xx + 0.30 * (yy - H / 2)                  # leaning band
+BAND = float(os.environ.get('BAND', 70))
 for i in range(TOTAL):
     if i < D0: f = render_frame(i)
     elif i <= D1:
         t = (i - D0) / max(D1 - D0, 1); t = t * t * (3 - 2 * t)
-        f = render_frame(i) * (1 - t) + ph * t
+        rf = render_frame(i)
+        if REVEAL == 'dissolve': f = rf * (1 - t) + ph * t
+        else:
+            pos = X0 + (X1 - X0) * t
+            m = np.clip((pos - coord) / BAND + 0.5, 0, 1)[..., None]          # 1 = photo side
+            m = m * m * (3 - 2 * m)
+            f = rf * (1 - m) + ph * m
+            dark = cv2.GaussianBlur(((f.mean(2) < 120)).astype(np.float32), (0, 0), 3)[..., None]
+            glow = np.exp(-((coord - pos) / (BAND * 0.45)) ** 2)[..., None] * np.sin(np.pi * t)
+            f = f + glow * (dark * float(os.environ.get('GLOW_CHAIR', 55)) + (1 - dark) * float(os.environ.get('GLOW_WALL', 6)))                        # light catches the chair, faint on the wall
     else: f = ph
-    p.stdin.write(np.clip(f, 0, 255).astype(np.uint8).tobytes())
+    p.stdin.write(np.clip(dither(f), 0, 255).astype(np.uint8).tobytes())
 p.stdin.close(); p.wait(); print('ok', out)
