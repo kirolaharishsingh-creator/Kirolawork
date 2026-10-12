@@ -3,7 +3,7 @@
 #    only on the base (chrome legs) and frame (chrome ring); other parts dielectric, slightly rough.
 #  - gas lift rebuilt as clean bevelled cylinders (black body + dust-cover ring), from the base hub to the mechanism.
 #  - base moved so its hub column sits exactly under the gas lift (the fit leaves it ~3 cm off).
-#  - headrest moved forward onto the spine's top clamp (HEAD_DY, HEAD_DZ).
+#  - upper spine lifted to the backrest top (SPINE_DZ); headrest moved forward onto the spine's top clamp (HEAD_DY, HEAD_DZ).
 #  - wheel_0..4: the Tripo base already includes its castors; anim3 still needs the objects -> tiny hidden stand-ins
 #    at the old castor positions (they only steer the castors' fly-in direction, which now travels with the base).
 # Usage: python finish_tripo_chair.py in.blend out.blend   (env: DARK base-colour factor for non-metal, 0.42)
@@ -62,8 +62,16 @@ bpy.context.view_layer.objects.active = gl; bpy.ops.object.modifier_apply(modifi
 for p in me.polygons: p.use_smooth = True
 print('GAS', round(z0, 3), z1, round(cx, 4), round(cy, 4))
 
+# ---- spine top ends ~2 cm below the backrest top; on the real chair both meet at one height under the headrest.
+# Lift only the upper spine (smooth ramp from SPINE_Z0 up), so the seat and lumbar attachments stay put.
+fr = bpy.data.objects['frame']; SPINE_DZ = float(os.environ.get('SPINE_DZ', 0.02)); SPINE_Z0 = float(os.environ.get('SPINE_Z0', 0.62))
+fz1 = max(v.co.z for v in fr.data.vertices)
+for v in fr.data.vertices:
+    t = min(max((v.co.z - SPINE_Z0) / (fz1 - SPINE_Z0), 0), 1); v.co.z += SPINE_DZ * t * t * (3 - 2 * t)
+fr.data.update(); print('SPINE TOP', round(fz1, 3), '->', round(fz1 + SPINE_DZ, 3))
+
 # ---- headrest (old model) stands ~10 mm behind the Tripo spine's top clamp: seat its post against the clamp like the real chair
-hr = bpy.data.objects['headrest']; HEAD_DY = float(os.environ.get('HEAD_DY', -0.012)); HEAD_DZ = float(os.environ.get('HEAD_DZ', 0))
+hr = bpy.data.objects['headrest']; HEAD_DY = float(os.environ.get('HEAD_DY', -0.012)); HEAD_DZ = float(os.environ.get('HEAD_DZ', -0.015))
 hr.data.transform(mathutils.Matrix.Translation((0, HEAD_DY, HEAD_DZ))); hr.data.update(); print('HEAD SHIFT', HEAD_DY, HEAD_DZ)
 
 # ---- castor stand-ins
