@@ -3,6 +3,7 @@
 #    only on the base (chrome legs) and frame (chrome ring); other parts dielectric, slightly rough.
 #  - gas lift rebuilt as clean bevelled cylinders (black body + dust-cover ring), from the base hub to the mechanism.
 #  - base moved so its hub column sits exactly under the gas lift (the fit leaves it ~3 cm off).
+#  - headrest moved forward onto the spine's top clamp (HEAD_DY, HEAD_DZ).
 #  - wheel_0..4: the Tripo base already includes its castors; anim3 still needs the objects -> tiny hidden stand-ins
 #    at the old castor positions (they only steer the castors' fly-in direction, which now travels with the base).
 # Usage: python finish_tripo_chair.py in.blend out.blend   (env: DARK base-colour factor for non-metal, 0.42)
@@ -60,6 +61,10 @@ bv_ = gl.modifiers.new('bev', 'BEVEL'); bv_.width = 0.0015; bv_.segments = 3; bv
 bpy.context.view_layer.objects.active = gl; bpy.ops.object.modifier_apply(modifier='bev')
 for p in me.polygons: p.use_smooth = True
 print('GAS', round(z0, 3), z1, round(cx, 4), round(cy, 4))
+
+# ---- headrest (old model) stands ~10 mm behind the Tripo spine's top clamp: seat its post against the clamp like the real chair
+hr = bpy.data.objects['headrest']; HEAD_DY = float(os.environ.get('HEAD_DY', -0.012)); HEAD_DZ = float(os.environ.get('HEAD_DZ', 0))
+hr.data.transform(mathutils.Matrix.Translation((0, HEAD_DY, HEAD_DZ))); hr.data.update(); print('HEAD SHIFT', HEAD_DY, HEAD_DZ)
 
 # ---- castor stand-ins
 for n, (x, y, z) in WHEEL_POS.items():
