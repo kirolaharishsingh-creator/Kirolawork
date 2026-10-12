@@ -155,6 +155,21 @@ _out = [n for n in _wn if n.type == 'OUTPUT_WORLD'][0]
 _bg2 = _wn.new('ShaderNodeBackground'); _bg2.inputs[0].default_value = (0.62, 0.62, 0.64, 1); _bg2.inputs[1].default_value = float(os.environ.get('CHROME_ENV', 0.3))
 _lp = _wn.new('ShaderNodeLightPath'); _mx = _wn.new('ShaderNodeMixShader')
 _wl.new(_lp.outputs['Is Glossy Ray'], _mx.inputs[0]); _wl.new(bg.outputs[0], _mx.inputs[1]); _wl.new(_bg2.outputs[0], _mx.inputs[2]); _wl.new(_mx.outputs[0], _out.inputs['Surface'])
+CHROME = float(os.environ.get('CHROME', 0))     # >0: brighter, crisper chrome base (studio horizon reflection + polish)
+if CHROME:
+    # chrome reads as chrome by its contrast: bright soft-box sky over a dark floor, with a sharp horizon line
+    _tc = _wn.new('ShaderNodeTexCoord'); _sp = _wn.new('ShaderNodeSeparateXYZ'); _wl.new(_tc.outputs['Generated'], _sp.inputs[0])
+    _ramp = _wn.new('ShaderNodeValToRGB'); _wl.new(_sp.outputs['Z'], _ramp.inputs[0]); e = _ramp.color_ramp.elements
+    e[0].position, e[0].color = 0.0, (0.06, 0.06, 0.065, 1); e[1].position, e[1].color = 0.06, (1.0, 1.0, 1.0, 1)   # Generated = direction, z<0 clamps dark
+    _wl.new(_ramp.outputs[0], _bg2.inputs[0]); _bg2.inputs[1].default_value = float(os.environ.get('CHROME_ENV', 0.3)) * CHROME
+    _m = bpy.data.materials.get('tp_base')
+    if _m:                                          # metal areas of the Tripo base: near-white silver, low roughness
+        nt, L = _m.node_tree, _m.node_tree.links; pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
+        met = pb.inputs['Metallic'].links[0].from_socket; bc = pb.inputs['Base Color'].links[0].from_socket; ro = pb.inputs['Roughness'].links[0].from_socket
+        mc = nt.nodes.new('ShaderNodeMix'); mc.data_type = 'RGBA'; L.new(met, mc.inputs[0]); L.new(bc, mc.inputs[6])
+        mc.inputs[7].default_value = (0.92, 0.92, 0.93, 1); L.new(mc.outputs[2], pb.inputs['Base Color'])
+        mr = nt.nodes.new('ShaderNodeMix'); mr.data_type = 'FLOAT'; L.new(met, mr.inputs[0]); L.new(ro, mr.inputs[2])
+        mr.inputs[3].default_value = float(os.environ.get('CHROME_ROUGH', 0.06)); L.new(mr.outputs[0], pb.inputs['Roughness'])
 
 LROT = math.radians(float(os.environ.get('LIGHT_ROT', 23)))      # turn the light rig with the camera (CAM_AZ - 15)
 def area(name, loc, energy, size):
