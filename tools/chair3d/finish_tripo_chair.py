@@ -2,6 +2,7 @@
 #  - Tripo materials renamed tp_<part> (anim3 leaves tp_* alone): base colour darkened toward the real black, metal kept
 #    only on the base (chrome legs) and frame (chrome ring); other parts dielectric, slightly rough.
 #  - gas lift rebuilt as clean bevelled cylinders (black body + dust-cover ring), from the base hub to the mechanism.
+#  - base moved so its hub column sits exactly under the gas lift (the fit leaves it ~3 cm off).
 #  - wheel_0..4: the Tripo base already includes its castors; anim3 still needs the objects -> tiny hidden stand-ins
 #    at the old castor positions (they only steer the castors' fly-in direction, which now travels with the base).
 # Usage: python finish_tripo_chair.py in.blend out.blend   (env: DARK base-colour factor for non-metal, 0.42)
@@ -39,7 +40,11 @@ for o in [o for o in bpy.data.objects if o.type == 'MESH']:
 old = bpy.data.objects['gas_lift']; v = np.array([old.matrix_world @ x.co for x in old.data.vertices])
 cx, cy = (v[:, 0].min() + v[:, 0].max()) / 2, (v[:, 1].min() + v[:, 1].max()) / 2
 mat = bpy.data.materials.get('frame_plastic'); bpy.data.objects.remove(old, do_unlink=True)
-bv = np.array([x.co for x in bpy.data.objects['base'].data.vertices]); near = np.hypot(bv[:, 0] - cx, bv[:, 1] - cy) < 0.03
+# the fitted Tripo base lands ~3 cm off the seat axis: move it so its hub column (top 4 cm) is centred under the lift
+base = bpy.data.objects['base']; bv = np.array([base.matrix_world @ x.co for x in base.data.vertices]); top = bv[bv[:, 2] > bv[:, 2].max() - 0.04]
+SHIFT = np.array([cx, cy]) - (top[:, :2].min(0) + top[:, :2].max(0)) / 2
+base.data.transform(mathutils.Matrix.Translation((SHIFT[0], SHIFT[1], 0))); base.data.update(); print('BASE SHIFT', SHIFT.round(4))
+bv = np.array([base.matrix_world @ x.co for x in base.data.vertices]); near = np.hypot(bv[:, 0] - cx, bv[:, 1] - cy) < 0.03
 z0 = float(bv[near, 2].max()) - 0.03 if near.any() else 0.13; z1 = 0.305
 bm = bmesh.new()
 def cyl(r, za, zb, seg=64):
@@ -58,6 +63,7 @@ print('GAS', round(z0, 3), z1, round(cx, 4), round(cy, 4))
 
 # ---- castor stand-ins
 for n, (x, y, z) in WHEEL_POS.items():
+    x, y = x + SHIFT[0], y + SHIFT[1]
     me = bpy.data.meshes.new(n); me.from_pydata([(x, y, z), (x + 1e-4, y, z), (x, y + 1e-4, z)], [], [(0, 1, 2)])
     o = bpy.data.objects.new(n, me); bpy.context.scene.collection.objects.link(o); o.hide_render = True
 bpy.ops.wm.save_as_mainfile(filepath=dst); print('saved', dst)
