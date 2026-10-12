@@ -72,6 +72,10 @@ fr.data.update(); print('SPINE TOP', round(fz1, 3), '->', round(fz1 + SPINE_DZ, 
 
 # ---- headrest (old model) stands ~10 mm behind the Tripo spine's top clamp: seat its post against the clamp like the real chair
 hr = bpy.data.objects['headrest']; HEAD_DY = float(os.environ.get('HEAD_DY', -0.012)); HEAD_DZ = float(os.environ.get('HEAD_DZ', -0.015))
+# the rear post (lock) hangs ~0.9x the loop height below the spine top on the real chair, ours ~0.55x: stretch it down
+HEAD_POST = float(os.environ.get('HEAD_POST', 0.045)); PZ1 = 0.835
+pv = [v for v in hr.data.vertices if v.co.y > 0.225 and v.co.z < PZ1]; pz0 = min(v.co.z for v in pv)
+for v in pv: v.co.z = PZ1 - (PZ1 - v.co.z) * (PZ1 - pz0 + HEAD_POST) / (PZ1 - pz0)
 hr.data.transform(mathutils.Matrix.Translation((0, HEAD_DY, HEAD_DZ))); hr.data.update(); print('HEAD SHIFT', HEAD_DY, HEAD_DZ)
 
 # ---- castor stand-ins
