@@ -187,6 +187,24 @@ def camera_at(e):
     pos = target + dist * mathutils.Vector((math.cos(EL) * math.cos(AZ), math.cos(EL) * math.sin(AZ), math.sin(EL)))
     camo.location = pos; camo.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
 
+# RECLINE (USP recline / multilock): keys 't_seconds:hip_angle_increase_deg,...' (0 = upright 90 deg, 30 = 120, 45 = 135).
+# The back unit (backrest, frame/spine, lumbar, headrest) turns back about a pivot under the seat's rear; the seat and both
+# armrests tilt with it at RSYNC of the back's angle (synchro), so the seat-to-backrest angle rises by exactly the key value.
+RECLINE = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('RECLINE', '').split(',') if k]
+RSYNC = float(os.environ.get('RSYNC', 0.18))
+def _pt(env, dflt):
+    v = R @ mathutils.Vector([float(x) for x in os.environ.get(env, dflt).split(',')]); return mathutils.Vector((v.x - hub[0], v.y - hub[1], v.z))
+if RECLINE:
+    BACK_P, SEAT_P = _pt('RPIVOT', '0,0.11,0.31'), _pt('SPIVOT', '0,-0.13,0.32')       # old-model coords (x side, y back, z up)
+    for _n in ('backrest', 'frame', 'lumbar', 'headrest', 'seat', 'arm_l', 'arm_r'): objs[_n].rotation_mode = 'XYZ'
+def recline_hip(t):
+    if t <= RECLINE[0][0]: return RECLINE[0][1]
+    for (t0, a0), (t1, a1) in zip(RECLINE, RECLINE[1:]):
+        if t <= t1: return a0 + (a1 - a0) * smooth((t - t0) / max(t1 - t0, 1e-6))
+    return RECLINE[-1][1]
+def turn(o, P, ang):
+    Rm = mathutils.Matrix.Rotation(ang, 3, 'Y'); o.rotation_euler = (0, ang, 0); o.location = P - Rm @ P
+
 def pose(f):
     u = f / N
     pivot.rotation_euler = (0, 0, 0 if os.environ.get('NOROT') == '1' else 2 * math.pi * u)   # one full turn: frame N = frame 0
@@ -214,6 +232,13 @@ def pose(f):
             objs['wheel%d' % i]['glow'] = 0.0; objs['wheel%d' % i]['sweep'] = 1.06; objs['wheel%d' % i]['ray'] = 0.0
         global D0, D1
         D0, D1 = A_D0, A_D1; e = smooth(u / A_CAMEND)
+    if RECLINE:
+        hip = math.radians(recline_hip(f / FPS)); back = -hip / (1 - RSYNC); seat = back * RSYNC   # negative = top goes back
+        for _n in ('backrest', 'frame', 'lumbar', 'headrest'): turn(objs[_n], BACK_P, back)
+        for _n in ('seat', 'arm_l', 'arm_r'): turn(objs[_n], SEAT_P, seat)
+        if os.environ.get('RDEBUG'):
+            bpy.context.view_layer.update(); h = objs['headrest']; c = sum((h.matrix_world @ mathutils.Vector(b) for b in h.bound_box), mathutils.Vector()) / 8
+            print('RDBG', f, round(math.degrees(back), 1), [round(v, 3) for v in c], [round(v, 3) for v in (pivot.matrix_world @ BACK_P)], flush=True)
     camera_at(e)
     bpy.context.view_layer.update()
 
