@@ -24,7 +24,7 @@ am = O[MASTER]; v = verts(am); top = v[v[:, 2] > v[:, 2].max() - 0.03]; c = top.
 n = np.linalg.svd(top - c, full_matrices=False)[2][2]; n *= np.sign(n[2])
 tilt = math.atan2(n[0], n[2])                              # pad roll about the chair's front-back axis (y)
 bot = v[v[:, 2] < v[:, 2].min() + 0.03].mean(0)
-Rl = mathutils.Matrix.Translation(bot) @ mathutils.Matrix.Rotation(tilt, 4, 'Y') @ mathutils.Matrix.Translation(-bot)
+Rl = mathutils.Matrix.Translation(bot) @ mathutils.Matrix.Rotation(-tilt, 4, 'Y') @ mathutils.Matrix.Translation(-bot)
 am.data.transform(Rl); am.data.update()
 # the pad sits on the post with an open slot on the inner side: fill it with a solid block the post's size
 import bmesh
