@@ -73,10 +73,29 @@ fr.data.update(); print('SPINE TOP', round(fz1, 3), '->', round(fz1 + SPINE_DZ, 
 # ---- headrest (old model) stands ~10 mm behind the Tripo spine's top clamp: seat its post against the clamp like the real chair
 hr = bpy.data.objects['headrest']; HEAD_DY = float(os.environ.get('HEAD_DY', -0.012)); HEAD_DZ = float(os.environ.get('HEAD_DZ', -0.015))
 # the rear post (lock) hangs ~0.9x the loop height below the spine top on the real chair, ours ~0.55x: stretch it down
-HEAD_POST = float(os.environ.get('HEAD_POST', 0.045)); PZ1 = 0.835
+HEAD_POST = float(os.environ.get('HEAD_POST', 0.02)); PZ1 = 0.835
 pv = [v for v in hr.data.vertices if v.co.y > 0.225 and v.co.z < PZ1]; pz0 = min(v.co.z for v in pv)
 for v in pv: v.co.z = PZ1 - (PZ1 - v.co.z) * (PZ1 - pz0 + HEAD_POST) / (PZ1 - pz0)
 hr.data.transform(mathutils.Matrix.Translation((0, HEAD_DY, HEAD_DZ))); hr.data.update(); print('HEAD SHIFT', HEAD_DY, HEAD_DZ)
+
+# ---- headrest lock: on the real chair a solid housing caps the spine top and reaches back to the headrest post
+# (top flush with the spine top). LOCK='x0,x1,y0,y1,z0' in the cleaned-model frame, top = spine top; '' = off.
+LOCK = os.environ.get('LOCK', '0.004,0.054,0.196,0.236,0.79')
+if LOCK:
+    x0, x1, y0, y1, z0 = map(float, LOCK.split(',')); z1 = max(v.co.z for v in fr.data.vertices)
+    bm = bmesh.new(); r = bmesh.ops.create_cube(bm, size=1.0)
+    bmesh.ops.scale(bm, verts=r['verts'], vec=(x1 - x0, y1 - y0, z1 - z0)); bmesh.ops.translate(bm, verts=r['verts'], vec=((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2))
+    lk = fr.data.copy(); lk.clear_geometry(); bm.to_mesh(lk); bm.free()
+    bv_ = bpy.data.objects.new('lock_tmp', lk); bpy.context.scene.collection.objects.link(bv_); lk.materials.clear()
+    if mat: lk.materials.append(mat)
+    m_ = bv_.modifiers.new('bev', 'BEVEL'); m_.width = 0.004; m_.segments = 3
+    bpy.context.view_layer.objects.active = bv_; bpy.ops.object.modifier_apply(modifier='bev')
+    for p_ in lk.polygons: p_.use_smooth = True
+    # join into the headrest so it moves with the backrest group in anim3 (headrest is in the recline set)
+    nm = len(hr.data.materials); hr.data.materials.append(mat) if mat else None
+    for p_ in lk.polygons: p_.material_index = nm
+    bpy.ops.object.select_all(action='DESELECT'); bv_.select_set(True); hr.select_set(True); bpy.context.view_layer.objects.active = hr
+    bpy.ops.object.join(); print('LOCK', LOCK, round(z1, 3))
 
 # ---- castor stand-ins
 for n, (x, y, z) in WHEEL_POS.items():
