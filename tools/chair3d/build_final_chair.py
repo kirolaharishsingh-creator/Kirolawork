@@ -1,6 +1,7 @@
 # Final chair model: the finished Tripo-part chair (finish_tripo_chair.py output) made consistent and clean.
 #  - armrests: one master arm (ARM_MASTER, levelled so the pad is flat side to side) mirrored about the seat's centre
-#    plane, so both arms are exact mirror images (the two separate fits sat 4 cm apart front-to-back)
+#    plane, so both arms are exact mirror images (the two separate fits sat 4 cm apart front-to-back); a solid block
+#    closes the open slot between pad and post
 #  - materials: Tripo's base-colour maps carry baked light and light-grey patches. They are graded to the real chair's
 #    near-black (luminance remapped into BLACK_LO..BLACK_HI, keeps the weave/grain), normal maps kept.
 #    Plastic parts roughness 0.5, seat fabric 0.95. Backrest/lumbar mesh: faces inside the moulded rim on the panel's
@@ -25,6 +26,16 @@ tilt = math.atan2(n[0], n[2])                              # pad roll about the 
 bot = v[v[:, 2] < v[:, 2].min() + 0.03].mean(0)
 Rl = mathutils.Matrix.Translation(bot) @ mathutils.Matrix.Rotation(tilt, 4, 'Y') @ mathutils.Matrix.Translation(-bot)
 am.data.transform(Rl); am.data.update()
+# the pad sits on the post with an open slot on the inner side: fill it with a solid block the post's size
+import bmesh
+v = verts(am); zt = v[:, 2].max(); sl = v[(v[:, 2] > zt - 0.065) & (v[:, 2] < zt - 0.05)]
+cx_, cy_ = np.median(sl[:, 0]), np.median(sl[:, 1]); core = sl[(abs(sl[:, 0] - cx_) < 0.03) & (abs(sl[:, 1] - cy_) < 0.04)]
+lo3, hi3 = core.min(0), core.max(0); shrink = 0.002
+bm = bmesh.new(); bm.from_mesh(am.data); r_ = bmesh.ops.create_cube(bm, size=1.0)
+bmesh.ops.scale(bm, verts=r_['verts'], vec=(hi3[0] - lo3[0] - 2 * shrink, hi3[1] - lo3[1] - 2 * shrink, 0.05))
+bmesh.ops.translate(bm, verts=r_['verts'], vec=((lo3[0] + hi3[0]) / 2, (lo3[1] + hi3[1]) / 2, zt - 0.04))
+bm.to_mesh(am.data); bm.free(); am.data.update()
+print('ARM PAD BLOCK', (hi3 - lo3).round(3), 'z', round(zt - 0.065, 3), '-', round(zt - 0.015, 3))
 old = O[OTHER]; omats = list(old.data.materials); bpy.data.objects.remove(old, do_unlink=True)
 me = am.data.copy(); me.name = OTHER
 me.transform(mathutils.Matrix.Translation((XC, 0, 0)) @ mathutils.Matrix.Scale(-1, 4, (1, 0, 0)) @ mathutils.Matrix.Translation((-XC, 0, 0)))

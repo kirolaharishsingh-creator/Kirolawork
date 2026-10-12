@@ -67,8 +67,16 @@ bpy.ops.wm.open_mainfile(filepath=os.environ.get('BLEND', 'chair_fixed.blend'))
 sc = bpy.context.scene
 objs = {o.name.replace('wheel_', 'wheel'): o for o in sc.objects if o.type == 'MESH'}
 R = mathutils.Matrix.Translation((0, 0, FLOOR0)) @ mathutils.Matrix.Rotation(math.pi / 2, 4, 'Z')
-for o in objs.values():
-    o.data.transform(R); o.data.update()
+# RIG=1 (final rigged model, rig_final_chair.py): the meshes stay in model coordinates under CHAIR_RIG and its drivers move
+# the parts; RIGKEYS animates its properties. Otherwise every mesh is baked into the render frame (R) as before.
+RIGMODE = os.environ.get('RIG') == '1' and 'CHAIR_RIG' in bpy.data.objects
+if RIGMODE:
+    RIGO = bpy.data.objects['CHAIR_RIG']
+    for o in objs.values():
+        if o.parent is None: o.parent = RIGO; o.matrix_parent_inverse.identity()
+else:
+    for o in objs.values():
+        o.parent = None; o.data.transform(R); o.data.update()
 
 # ---- materials (same treatment as anim2.py)
 def tripo_colour(m):
@@ -133,9 +141,16 @@ def centre(o):
 
 # ---- turntable: every part hangs off a pivot on the gas-lift axis; offsets are in the chair's own frame
 hub = centre(objs['gas_lift'])[:2]
+if RIGMODE: hub = np.array((R @ mathutils.Vector((hub[0], hub[1], 0)))[:2])
 pivot = bpy.data.objects.new('pivot', None); sc.collection.objects.link(pivot); pivot.location = (hub[0], hub[1], 0)
-for o in objs.values():
-    o.data.transform(mathutils.Matrix.Translation((-hub[0], -hub[1], 0))); o.parent = pivot; o.matrix_parent_inverse.identity()
+if RIGMODE:
+    RIGO.parent = pivot; RIGO.matrix_parent_inverse.identity(); RIGO.matrix_basis = mathutils.Matrix.Translation((-hub[0], -hub[1], 0)) @ R
+else:
+    for o in objs.values():
+        o.data.transform(mathutils.Matrix.Translation((-hub[0], -hub[1], 0))); o.parent = pivot; o.matrix_parent_inverse.identity()
+    # split pieces of the final model ('family__piece': armrest sleeve/pad/tube, headrest lock) ride on their family part
+    for n in [n for n in objs if '__' in n]:
+        objs[n].parent = objs[n.split('__')[0]]; objs[n].matrix_parent_inverse.identity(); del objs[n]
 for i in range(5):
     d = centre(objs['wheel%d' % i])[:2]; d /= np.linalg.norm(d)
     MOVES['wheel%d' % i] = (7, (WHEEL_OUT * d[0], WHEEL_OUT * d[1], -WHEEL_DROP))
@@ -220,6 +235,15 @@ def recline_hip(t):
 def turn(o, P, ang):
     Rm = mathutils.Matrix.Rotation(ang, 3, 'Y'); o.rotation_euler = (0, ang, 0); o.location = P - Rm @ P
 
+# RIGKEYS='prop=t:v,t:v;prop2=...' (seconds, property value; smooth between keys) drives CHAIR_RIG properties (RIG=1)
+RIGKEYS = {k.split('=')[0]: [tuple(float(x) for x in kv.split(':')) for kv in k.split('=')[1].split(',')]
+           for k in os.environ.get('RIGKEYS', '').split(';') if '=' in k}
+def keyed(keys, t):
+    if t <= keys[0][0]: return keys[0][1]
+    for (t0, a0), (t1, a1) in zip(keys, keys[1:]):
+        if t <= t1: return a0 + (a1 - a0) * smooth((t - t0) / max(t1 - t0, 1e-6))
+    return keys[-1][1]
+
 def pose(f):
     u = f / N
     pivot.rotation_euler = (0, 0, 0 if os.environ.get('NOROT') == '1' else 2 * math.pi * u)   # one full turn: frame N = frame 0
@@ -254,6 +278,9 @@ def pose(f):
         if os.environ.get('RDEBUG'):
             bpy.context.view_layer.update(); h = objs['headrest']; c = sum((h.matrix_world @ mathutils.Vector(b) for b in h.bound_box), mathutils.Vector()) / 8
             print('RDBG', f, round(math.degrees(back), 1), [round(v, 3) for v in c], [round(v, 3) for v in (pivot.matrix_world @ BACK_P)], flush=True)
+    if RIGMODE:
+        for k, keys in RIGKEYS.items(): RIGO[k] = keyed(keys, f / FPS)
+        RIGO.update_tag(); bpy.context.evaluated_depsgraph_get().update()
     camera_at(e)
     bpy.context.view_layer.update()
 
