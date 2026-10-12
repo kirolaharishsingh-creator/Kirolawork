@@ -178,7 +178,7 @@ if CHROME:
     e[0].position, e[0].color = 0.0, (0.06, 0.06, 0.065, 1); e[1].position, e[1].color = 0.06, (1.0, 1.0, 1.0, 1)   # Generated = direction, z<0 clamps dark
     _wl.new(_ramp.outputs[0], _bg2.inputs[0]); _bg2.inputs[1].default_value = float(os.environ.get('CHROME_ENV', 0.3)) * CHROME
     _m = bpy.data.materials.get('tp_base')
-    if _m:                                          # metal areas of the Tripo base: near-white silver, low roughness
+    if _m and all([x for x in _m.node_tree.nodes if x.type == 'BSDF_PRINCIPLED'][0].inputs[k].links for k in ('Metallic', 'Base Color', 'Roughness')):   # metal areas of the Tripo base: near-white silver, low roughness
         nt, L = _m.node_tree, _m.node_tree.links; pb = [n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'][0]
         met = pb.inputs['Metallic'].links[0].from_socket; bc = pb.inputs['Base Color'].links[0].from_socket; ro = pb.inputs['Roughness'].links[0].from_socket
         mc = nt.nodes.new('ShaderNodeMix'); mc.data_type = 'RGBA'; L.new(met, mc.inputs[0]); L.new(bc, mc.inputs[6])

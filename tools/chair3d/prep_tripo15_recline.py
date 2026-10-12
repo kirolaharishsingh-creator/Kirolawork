@@ -1,0 +1,84 @@
+# Recline model from the client's 15-part Tripo chair (re-export of tripo_chair_clean_front_pbr): best side profile and
+# already split into parts, so the back unit tilts as whole parts (no cut through a single mesh).
+#  - straightened: turned about z so the armrests sit on the x axis (front = -y, back = +y), column on the origin
+#  - parts renamed for anim3.py: backrest, frame (spine + its foot), headrest, lumbar (+ knob), seat, arm_l/arm_r,
+#    mechanism, base, wheel_0..4 (the base mesh carries one castor -> wheel_4 is a hidden stand-in), gas_lift stand-in
+#  - materials graded like build_final_chair.py: true black (patchy light texels gone), chrome where the metal map says
+#    the base's legs and hub (no metal map in this export; its castor faces black; named tp_base for anim3's CHROME option)
+# Prints RPIVOT / SPIVOT for anim3's RECLINE mode.
+# Usage: python prep_tripo15_recline.py model.glb out.blend
+import bpy, bmesh, sys, math, numpy as np, mathutils
+src, dst = sys.argv[-2:]
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_scene.gltf(filepath=src)
+P = {}
+for o in [o for o in bpy.data.objects if o.type == 'MESH']:
+    o.parent = None; o.data.transform(o.matrix_world); o.matrix_world.identity(); P[o.name] = o
+for o in [o for o in bpy.data.objects if o.type != 'MESH']: bpy.data.objects.remove(o, do_unlink=True)
+def V(o): a = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', a); return a.reshape(-1, 3)
+def C(o): a = V(o); return (a.min(0) + a.max(0)) / 2
+
+# straighten: armrest centres on the x axis, spine behind (+y)
+a7, a8 = C(P['tripo_part_7']), C(P['tripo_part_8']); d = a8 - a7
+yaw = -math.atan2(d[1], d[0]); Rz = mathutils.Matrix.Rotation(yaw, 4, 'Z')
+for o in P.values(): o.data.transform(Rz)
+if C(P['tripo_part_6'])[1] < C(P['tripo_part_5'])[1]:            # spine must be behind the seat
+    for o in P.values(): o.data.transform(mathutils.Matrix.Rotation(math.pi, 4, 'Z'))
+b = V(P['tripo_part_1']); col = b[(b[:, 2] > 0.15)]; hub = np.median(col, 0)
+for o in P.values(): o.data.transform(mathutils.Matrix.Translation((-hub[0], -hub[1], 0)))
+print('YAW deg', round(math.degrees(yaw), 1), 'hub', hub.round(3), flush=True)
+
+def join(names, new):
+    obs = [P[n] for n in names]; bpy.ops.object.select_all(action='DESELECT')
+    for ob in obs: ob.select_set(True)
+    bpy.context.view_layer.objects.active = obs[0]
+    if len(obs) > 1: bpy.ops.object.join()
+    obs[0].name = new; obs[0].data.name = new; return obs[0]
+NAMES = {'backrest': ['tripo_part_0'], 'frame': ['tripo_part_6', 'tripo_part_3'], 'headrest': ['tripo_part_9'],
+         'lumbar': ['tripo_part_2', 'tripo_part_10'], 'seat': ['tripo_part_5'], 'mechanism': ['tripo_part_4'], 'base': ['tripo_part_1']}
+arms = sorted(['tripo_part_7', 'tripo_part_8'], key=lambda n: C(P[n])[0]); NAMES['arm_l'] = [arms[0]]; NAMES['arm_r'] = [arms[1]]
+wheels = sorted(['tripo_part_11', 'tripo_part_12', 'tripo_part_13', 'tripo_part_14'], key=lambda n: math.atan2(C(P[n])[1], C(P[n])[0]))
+for i, n in enumerate(wheels): NAMES['wheel_%d' % i] = [n]
+OB = {k: join(v, k) for k, v in NAMES.items()}
+
+def stub(name, at):
+    m = bpy.data.meshes.new(name); m.from_pydata([at, (at[0] + 1e-4, at[1], at[2]), (at[0], at[1] + 1e-4, at[2])], [], [(0, 1, 2)])
+    ob = bpy.data.objects.new(name, m); bpy.context.scene.collection.objects.link(ob); ob.hide_render = True; return ob
+stub('gas_lift', (0, 0, 0.2))
+bb = V(OB['base']); far = bb[(bb[:, 2] < 0.07)]; ang = np.arctan2(far[:, 1], far[:, 0]); r = np.hypot(far[:, 0], far[:, 1])
+stub('wheel_4', tuple(far[np.argmax(r)]))
+
+# materials
+LO, HI = 0.006, 0.05
+for k, ob in OB.items():
+    for m in ob.data.materials:
+        m.name = 'tp_base' if k == 'base' else 'tp_' + k
+        nt, L = m.node_tree, m.node_tree.links; pb = [x for x in nt.nodes if x.type == 'BSDF_PRINCIPLED'][0]
+        tex = pb.inputs['Base Color'].links[0].from_node if pb.inputs['Base Color'].links else None
+        met = pb.inputs['Metallic'].links[0].from_socket if pb.inputs['Metallic'].links else None
+        for s in ('Base Color', 'Roughness', 'Metallic'):
+            for l in list(pb.inputs[s].links): L.remove(l)
+        gr = nt.nodes.new('ShaderNodeMapRange'); gr.clamp = True
+        gr.inputs['From Min'].default_value, gr.inputs['From Max'].default_value = 0.02, 0.5
+        gr.inputs['To Min'].default_value, gr.inputs['To Max'].default_value = LO, HI * (0.6 if k == 'seat' else 1)
+        if tex: bw = nt.nodes.new('ShaderNodeRGBToBW'); L.new(tex.outputs['Color'], bw.inputs[0]); L.new(bw.outputs[0], gr.inputs['Value'])
+        else: gr.inputs['Value'].default_value = 0.1
+        if k == 'base':                  # no metal map in this export: legs + hub polished chrome, its castor black (below)
+            pb.inputs['Base Color'].default_value = (0.92, 0.92, 0.93, 1); pb.inputs['Metallic'].default_value = 1.0
+            pb.inputs['Roughness'].default_value = 0.06
+        else:
+            L.new(gr.outputs['Result'], pb.inputs['Base Color']); pb.inputs['Metallic'].default_value = 0.0
+            pb.inputs['Roughness'].default_value = 0.9 if k == 'seat' else 0.55
+
+# the base mesh carries one castor: its faces (low and far out) get a black copy of a castor material
+bo = OB['base']; cm_ = OB['wheel_0'].data.materials[0]; bo.data.materials.append(cm_)
+fc = np.zeros(len(bo.data.polygons) * 3); bo.data.polygons.foreach_get('center', fc); fc = fc.reshape(-1, 3)
+mi = np.zeros(len(fc), np.int32); mi[((fc[:, 2] < 0.065) & (np.hypot(fc[:, 0], fc[:, 1]) > 0.2)) | ((fc[:, 2] > 0.13) & (np.hypot(fc[:, 0], fc[:, 1]) < 0.045))] = len(bo.data.materials) - 1   # + the gas-lift column
+bo.data.polygons.foreach_set('material_index', mi); bo.data.update(); print('BASE castor faces', int((mi > 0).sum()), flush=True)
+
+# pivots: back unit turns at the spine foot under the seat's rear edge; seat tilts about the mechanism's front top
+s = V(OB['seat']); m = V(OB['mechanism'])
+RP = (0.0, float(s[:, 1].max() - 0.03), float(s[:, 2].min() + 0.01)); SP = (0.0, float(m[:, 1].min()), float(m[:, 2].max()))
+print('RPIVOT=%.4f,%.4f,%.4f SPIVOT=%.4f,%.4f,%.4f' % (RP + SP), flush=True)
+for k, ob in OB.items(): print('PART', k, C(ob).round(3), flush=True)
+bpy.ops.wm.save_as_mainfile(filepath=dst, compress=True); print('saved', dst, flush=True)
