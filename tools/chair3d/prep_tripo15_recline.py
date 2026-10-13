@@ -60,6 +60,25 @@ b = V(P['tripo_part_1']); col = b[(b[:, 2] > 0.15)]; hub = np.median(col, 0)
 for o in P.values(): o.data.transform(mathutils.Matrix.Translation((-hub[0], -hub[1], 0)))
 print('YAW deg', round(math.degrees(yaw), 1), 'hub', hub.round(3), flush=True)
 
+# lumbar depth slide: a fixed rod from the spine into the pivot arm (part 10), hidden inside the arm at rest, shows as
+# the pad + arm slide forward (frame__lumbrod follows the frame)
+a10 = V(P['tripo_part_10']); yz = a10[:, 1:]; cyz = yz.mean(0); d2 = np.linalg.svd(yz - cyz, full_matrices=False)[2][0]
+if d2[0] < 0: d2 = -d2                                         # side-view direction of the arm, +y = towards the spine
+ax10 = np.array([0.0, d2[0], d2[1]]); t10 = (yz - cyz) @ d2; end = a10[t10 > t10.max() - 0.012]
+rear = np.array([np.median(end[:, 0]), *(cyz + d2 * t10.max())])
+r10 = float(min(np.ptp(end[:, 0]), np.ptp(end[:, 2])) / 2 * 0.6)
+ROD = float(os.environ.get('ROD', 0.06))
+rb = bmesh.new(); rr = bmesh.ops.create_cone(rb, cap_ends=True, segments=24, radius1=r10, radius2=r10, depth=ROD)
+q = mathutils.Vector((0, 0, 1)).rotation_difference(mathutils.Vector(ax10.tolist()))
+bmesh.ops.rotate(rb, verts=rr['verts'], cent=(0, 0, 0), matrix=q.to_matrix())
+bmesh.ops.translate(rb, verts=rr['verts'], vec=mathutils.Vector((rear - ax10 * (ROD / 2 - 0.012)).tolist()))
+rme = bpy.data.meshes.new('frame__lumbrod'); rb.to_mesh(rme); rb.free()
+rm_ = bpy.data.materials.new('tp_lumbrod'); rm_.use_nodes = True; rp_ = rm_.node_tree.nodes['Principled BSDF']
+rp_.inputs['Base Color'].default_value = (0.022, 0.022, 0.024, 1); rp_.inputs['Roughness'].default_value = 0.45; rme.materials.append(rm_)
+for pl in rme.polygons: pl.use_smooth = True
+P['frame__lumbrod'] = bpy.data.objects.new('frame__lumbrod', rme); bpy.context.scene.collection.objects.link(P['frame__lumbrod'])
+print('LUMB ROD r', round(r10, 4), 'axis', ax10.round(3), 'rear', rear.round(3), flush=True)
+
 def join(names, new):
     obs = [P[n] for n in names]; bpy.ops.object.select_all(action='DESELECT')
     for ob in obs: ob.select_set(True)
@@ -67,7 +86,8 @@ def join(names, new):
     if len(obs) > 1: bpy.ops.object.join()
     obs[0].name = new; obs[0].data.name = new; return obs[0]
 NAMES = {'backrest': ['tripo_part_0'], 'frame': ['tripo_part_6', 'tripo_part_3'], 'headrest': ['tripo_part_9'],
-         'lumbar': ['tripo_part_2', 'tripo_part_10'], 'seat': ['tripo_part_5'], 'mechanism': ['tripo_part_4'], 'base': ['tripo_part_1']}
+         'lumbar': ['tripo_part_2', 'tripo_part_10'],   # pad + its pivot arm (part 10) slide together
+ 'seat': ['tripo_part_5'], 'mechanism': ['tripo_part_4'], 'base': ['tripo_part_1']}
 arms = sorted(['tripo_part_7', 'tripo_part_8'], key=lambda n: C(P[n])[0]); NAMES['arm_l'] = [arms[0]]; NAMES['arm_r'] = [arms[1]]
 wheels = sorted(['tripo_part_11', 'tripo_part_12', 'tripo_part_13', 'tripo_part_14'], key=lambda n: math.atan2(C(P[n])[1], C(P[n])[0]))
 for i, n in enumerate(wheels): NAMES['wheel_%d' % i] = [n]
