@@ -73,6 +73,19 @@ wheels = sorted(['tripo_part_11', 'tripo_part_12', 'tripo_part_13', 'tripo_part_
 for i, n in enumerate(wheels): NAMES['wheel_%d' % i] = [n]
 OB = {k: join(v, k) for k, v in NAMES.items()}
 
+# the lumbar loop's lower tip ends in a square-cut stub that pokes out under the loop: cut the tip square to its own
+# direction and cap it flat
+TRIM = os.environ.get('LUMB_TRIM', '0.230,0.412')        # cut point (y, z) on the tip; '' = off
+if TRIM:
+    ty, tz = map(float, TRIM.split(',')); ax = mathutils.Vector((0, 0.61, -0.79)).normalized()   # tip direction (down/back)
+    lb = bmesh.new(); lb.from_mesh(OB['lumbar'].data); lb.faces.ensure_lookup_table()
+    beyond = lambda c: (c.y - ty) * ax.y + (c.z - tz) * ax.z > 0 and c.y > ty - 0.03 and c.z < tz + 0.03
+    cut = [f for f in lb.faces if beyond(f.calc_center_median())]
+    bmesh.ops.delete(lb, geom=cut, context='FACES'); bmesh.ops.delete(lb, geom=[x for x in lb.verts if not x.link_faces], context='VERTS')
+    bd = [e for e in lb.edges if e.is_boundary and all(abs((v.co.y - ty) * ax.y + (v.co.z - tz) * ax.z) < 0.006 and v.co.y > ty - 0.03 for v in e.verts)]
+    if bd: bmesh.ops.holes_fill(lb, edges=bd, sides=0)
+    lb.to_mesh(OB['lumbar'].data); lb.free(); OB['lumbar'].data.update(); print('LUMBAR tip cut faces', len(cut), 'capped edges', len(bd), flush=True)
+
 def stub(name, at):
     m = bpy.data.meshes.new(name); m.from_pydata([at, (at[0] + 1e-4, at[1], at[2]), (at[0], at[1] + 1e-4, at[2])], [], [(0, 1, 2)])
     ob = bpy.data.objects.new(name, m); bpy.context.scene.collection.objects.link(ob); ob.hide_render = True; return ob
