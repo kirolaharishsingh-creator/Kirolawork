@@ -113,6 +113,24 @@ if DROP:
     bmesh.ops.delete(lb, geom=[lb.verts[i] for i in np.where(kill)[0]], context='VERTS'); lb.to_mesh(me_); lb.free(); me_.update()
     print('LUMBAR dropped pieces', bad, 'verts', int(kill.sum()), flush=True)
 
+# armrest 4D side slide: each pad splits off its post (faces above the height where the arm's cross-section widens into
+# the pad) as arm_x__pad, which follows its arm in anim3 and can slide sideways (ARM_SIDE)
+if os.environ.get('ARM_SPLIT', '1') == '1':
+    for side in ('arm_l', 'arm_r'):
+        ob = OB[side]; va = V(ob); zt = None
+        for z in np.arange(0.45, 0.6, 0.0025):
+            sl_ = va[abs(va[:, 2] - z) < 0.002]
+            if len(sl_) and np.ptp(sl_[:, 1]) > 0.10: zt = z - 0.006; break
+        mp = ob.data.copy(); mp.name = side + '__pad'; op = bpy.data.objects.new(side + '__pad', mp); bpy.context.scene.collection.objects.link(op)
+        for target, keep_top in ((ob, False), (op, True)):
+            bm_ = bmesh.new(); bm_.from_mesh(target.data); bm_.faces.ensure_lookup_table()
+            bmesh.ops.delete(bm_, geom=[f for f in bm_.faces if (f.calc_center_median().z > zt) != keep_top], context='FACES')
+            bmesh.ops.delete(bm_, geom=[x for x in bm_.verts if not x.link_faces], context='VERTS')
+            bd_ = [e for e in bm_.edges if e.is_boundary and all(abs(v.co.z - zt) < 0.01 for v in e.verts)]
+            if bd_: bmesh.ops.holes_fill(bm_, edges=bd_, sides=0)
+            bm_.to_mesh(target.data); bm_.free(); target.data.update()
+        print('ARM PAD split', side, 'at z', round(zt, 4), flush=True)
+
 def stub(name, at):
     m = bpy.data.meshes.new(name); m.from_pydata([at, (at[0] + 1e-4, at[1], at[2]), (at[0], at[1] + 1e-4, at[2])], [], [(0, 1, 2)])
     ob = bpy.data.objects.new(name, m); bpy.context.scene.collection.objects.link(ob); ob.hide_render = True; return ob

@@ -149,8 +149,9 @@ else:
     for o in objs.values():
         o.data.transform(mathutils.Matrix.Translation((-hub[0], -hub[1], 0))); o.parent = pivot; o.matrix_parent_inverse.identity()
     # split pieces of the final model ('family__piece': armrest sleeve/pad/tube, headrest lock) ride on their family part
+    FOLLOW = {}
     for n in [n for n in objs if '__' in n]:
-        objs[n].parent = objs[n.split('__')[0]]; objs[n].matrix_parent_inverse.identity(); del objs[n]
+        objs[n].parent = objs[n.split('__')[0]]; objs[n].matrix_parent_inverse.identity(); FOLLOW[n] = objs.pop(n)
 for i in range(5):
     d = centre(objs['wheel%d' % i])[:2]; d /= np.linalg.norm(d)
     MOVES['wheel%d' % i] = (7, (WHEEL_OUT * d[0], WHEEL_OUT * d[1], -WHEEL_DROP))
@@ -208,6 +209,7 @@ D0, D1 = float(os.environ.get('D0', 3.1)), float(os.environ.get('D1', 7.0))
 # its origin sits on the pivot and pose() rotates it there
 LUMB_TILT = float(os.environ.get('LUMB_TILT', 0))
 LUMB_TILTKEYS = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('LUMB_TILTKEYS', '').split(',') if k]   # 't_s:deg' (needs LUMB_TILT != 0)
+ARM_SIDE = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('ARM_SIDE', '').split(',') if k]
 LUMB_SLIDE = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('LUMB_SLIDE', '').split(',') if k]
 SEAT_SLIDE = float(os.environ.get('SEAT_SLIDE', 0))      # seat slider travel in metres
 if LUMB_TILT:
@@ -260,6 +262,10 @@ def pose(f):
         objs['seat'].location = (SEAT_SLIDE * 0.5 * (1 - math.cos(2 * math.pi * u)), 0, 0)    # +x is the chair's front after R
     if LUMB_SLIDE:           # USP lumbar depth: the pad slides straight forward / back (keys 't_s:metres forward')
         objs['lumbar'].location = (keyed(LUMB_SLIDE, f / FPS), 0, 0)                          # +x is the chair's front after R
+    if ARM_SIDE:             # USP armrest 4D side slide: both pads slide outward / inward on their posts (metres, + = out)
+        d = keyed(ARM_SIDE, f / FPS)
+        for side, sgn in (('arm_l', -1), ('arm_r', 1)):      # model x outward = render -y / +y after R
+            if side + '__pad' in FOLLOW: FOLLOW[side + '__pad'].location = (0, sgn * d, 0)
     if LUMB_TILT:            # USP lumbar shot: the lumbar pad rocks on its pivot rod (about the x axis), one cycle per loop
         lo_ = objs['lumbar']; lo_.location = LUMB_P        # (plain turntable mode: no explode offset)
         ang = keyed(LUMB_TILTKEYS, f / FPS) if LUMB_TILTKEYS else LUMB_TILT * math.sin(2 * math.pi * u)
