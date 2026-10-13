@@ -75,7 +75,7 @@ OB = {k: join(v, k) for k, v in NAMES.items()}
 
 # a loose plate under the lumbar loop's lower tip (an extra element, not on the real chair): remove the loose mesh pieces that
 # lie entirely in the box under the tip (LUMB_DROP='y0,z1': y > y0 and z < z1), the loop itself stays untouched
-DROP = os.environ.get('LUMB_DROP', '0.195,0.42')
+DROP = os.environ.get('LUMB_DROP', '')       # off: the 'extra element' was the 2D gap fill, the model's lumbar is fine
 if DROP:
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
