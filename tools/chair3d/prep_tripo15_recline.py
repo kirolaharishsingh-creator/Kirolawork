@@ -50,17 +50,20 @@ stub('wheel_4', tuple(far[np.argmax(r)]))
 
 # materials
 LO, HI = 0.006, 0.05
+import os; FLAT = float(os.environ.get('FLAT', 0.022))      # >0: one flat black (texture baked blotches gone), detail from geometry/normals
 for k, ob in OB.items():
     for m in ob.data.materials:
         m.name = 'tp_base' if k == 'base' else 'tp_' + k
         nt, L = m.node_tree, m.node_tree.links; pb = [x for x in nt.nodes if x.type == 'BSDF_PRINCIPLED'][0]
         tex = pb.inputs['Base Color'].links[0].from_node if pb.inputs['Base Color'].links else None
         met = pb.inputs['Metallic'].links[0].from_socket if pb.inputs['Metallic'].links else None
+        if os.environ.get('NONORMAL', '1') == '1':      # Tripo's normal maps carry the dark blotches (pads, seat, lumbar, knob)
+            for l in list(pb.inputs['Normal'].links): L.remove(l)
         for s in ('Base Color', 'Roughness', 'Metallic'):
             for l in list(pb.inputs[s].links): L.remove(l)
         gr = nt.nodes.new('ShaderNodeMapRange'); gr.clamp = True
         gr.inputs['From Min'].default_value, gr.inputs['From Max'].default_value = 0.02, 0.5
-        gr.inputs['To Min'].default_value, gr.inputs['To Max'].default_value = LO, HI * (0.6 if k == 'seat' else 1)
+        gr.inputs['To Min'].default_value, gr.inputs['To Max'].default_value = (FLAT, FLAT) if FLAT else (LO, HI * (0.6 if k == 'seat' else 1))
         if tex: bw = nt.nodes.new('ShaderNodeRGBToBW'); L.new(tex.outputs['Color'], bw.inputs[0]); L.new(bw.outputs[0], gr.inputs['Value'])
         else: gr.inputs['Value'].default_value = 0.1
         if k == 'base':                  # no metal map in this export: legs + hub polished chrome, its castor black (below)
