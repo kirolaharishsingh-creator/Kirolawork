@@ -207,11 +207,13 @@ D0, D1 = float(os.environ.get('D0', 3.1)), float(os.environ.get('D1', 7.0))
 # lumbar movement: pivot point of the lumbar pad (model coords before R, where its arm meets the spine); the mesh is moved so
 # its origin sits on the pivot and pose() rotates it there
 LUMB_TILT = float(os.environ.get('LUMB_TILT', 0))
+LUMB_TILTKEYS = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('LUMB_TILTKEYS', '').split(',') if k]   # 't_s:deg' (needs LUMB_TILT != 0)
 LUMB_SLIDE = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('LUMB_SLIDE', '').split(',') if k]
 SEAT_SLIDE = float(os.environ.get('SEAT_SLIDE', 0))      # seat slider travel in metres
 if LUMB_TILT:
     _p = [float(x) for x in os.environ.get('LUMB_PIVOT', '0.016,0.21,0.50').split(',')]
     _p = R @ mathutils.Vector(_p); LUMB_P = (_p[0] - hub[0], _p[1] - hub[1], _p[2]); objs['lumbar'].data.transform(mathutils.Matrix.Translation([-c for c in LUMB_P]))
+    objs['lumbar'].rotation_mode = 'XYZ'                   # glTF imports use quaternions: rotation_euler would be ignored
 def camera_at(e):
     dist = D0 + (D1 - D0) * e
     target = mathutils.Vector((hub[0] + float(os.environ.get('CAM_TX', 0)), hub[1] + float(os.environ.get('CAM_TY', 0)), float(os.environ.get('CAM_Z', 0.02)) - 0.04 * e))
@@ -260,7 +262,8 @@ def pose(f):
         objs['lumbar'].location = (keyed(LUMB_SLIDE, f / FPS), 0, 0)                          # +x is the chair's front after R
     if LUMB_TILT:            # USP lumbar shot: the lumbar pad rocks on its pivot rod (about the x axis), one cycle per loop
         lo_ = objs['lumbar']; lo_.location = LUMB_P        # (plain turntable mode: no explode offset)
-        lo_.rotation_euler = (0, math.radians(LUMB_TILT) * math.sin(2 * math.pi * u), 0)   # model x axis is y after R
+        ang = keyed(LUMB_TILTKEYS, f / FPS) if LUMB_TILTKEYS else LUMB_TILT * math.sin(2 * math.pi * u)
+        lo_.rotation_euler = (0, math.radians(ang), 0)   # model x axis is y after R
     if ASSEMBLE:
         floor.location.z = FLOOR0
         pivot.rotation_euler = (0, 0, -A_ARC * (1 - smooth(u / A_CAMEND)))
