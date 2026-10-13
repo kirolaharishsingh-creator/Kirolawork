@@ -7,7 +7,7 @@
 #    the base's legs and hub (no metal map in this export; its castor faces black; named tp_base for anim3's CHROME option)
 # Prints RPIVOT / SPIVOT for anim3's RECLINE mode.
 # Usage: python prep_tripo15_recline.py model.glb out.blend
-import bpy, bmesh, sys, math, numpy as np, mathutils
+import bpy, bmesh, sys, os, math, numpy as np, mathutils
 src, dst = sys.argv[-2:]
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=src)
@@ -18,9 +18,41 @@ for o in [o for o in bpy.data.objects if o.type != 'MESH']: bpy.data.objects.rem
 def V(o): a = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', a); return a.reshape(-1, 3)
 def C(o): a = V(o); return (a.min(0) + a.max(0)) / 2
 
+# the backrest rim carries raised lettering (a logo the generator modelled as relief) that catches the light once the back
+# reclines: smooth fine relief off the backrest (SMOOTH iterations of Laplacian-style smoothing; 0 = off)
+SM = int(os.environ.get('SMOOTH', 0))     # off: the backrest is many loose pieces and smoothing opens cracks
+if SM:
+    for n in ('tripo_part_0',):
+        o_ = P[n]; m_ = o_.modifiers.new('sm', 'SMOOTH'); m_.factor = 0.7; m_.iterations = SM
+        bpy.context.view_layer.objects.active = o_; bpy.ops.object.modifier_apply(modifier='sm')
+    print('SMOOTHED backrest', SM, flush=True)
+
+# chrome band over the flat cut where the upper spine (part 6) meets its lower curve (part 3), like the real chair's ring:
+# both parts' faces within BAND of the cut plane, pushed out 1 mm along their normals, polished chrome (frame__collar
+# follows the frame in anim3)
+def V0(o): a = np.zeros(len(o.data.vertices) * 3); o.data.vertices.foreach_get('co', a); return a.reshape(-1, 3)
+from scipy.spatial import cKDTree
+a6, a3 = V0(P['tripo_part_6']), V0(P['tripo_part_3']); seam = a6[cKDTree(a3).query(a6)[0] < 0.004]
+ZC = float(np.median(seam[:, 2])); BAND = float(os.environ.get('BAND', 0.006)); lo_, hi_ = seam.min(0) - 0.02, seam.max(0) + 0.02
+cbm = bmesh.new()
+for n in ('tripo_part_6', 'tripo_part_3'):
+    t = bmesh.new(); t.from_mesh(P[n].data); t.faces.ensure_lookup_table()
+    keep = lambda c: abs(c.z - ZC) < BAND and lo_[0] < c.x < hi_[0] and lo_[1] < c.y < hi_[1]
+    bmesh.ops.delete(t, geom=[f for f in t.faces if not keep(f.calc_center_median())], context='FACES')
+    bmesh.ops.delete(t, geom=[x for x in t.verts if not x.link_faces], context='VERTS')
+    t.normal_update()
+    for x in t.verts: x.co += x.normal * 0.001
+    me_ = bpy.data.meshes.new('tmp'); t.to_mesh(me_); t.free(); cbm.from_mesh(me_); bpy.data.meshes.remove(me_)
+cme = bpy.data.meshes.new('frame__collar'); cbm.to_mesh(cme); cbm.free()
+cm = bpy.data.materials.new('tp_chrome'); cm.use_nodes = True; pbc = cm.node_tree.nodes['Principled BSDF']
+pbc.inputs['Base Color'].default_value = (0.92, 0.92, 0.93, 1); pbc.inputs['Metallic'].default_value = 1.0; pbc.inputs['Roughness'].default_value = 0.08
+cme.materials.append(cm); P['frame__collar'] = bpy.data.objects.new('frame__collar', cme); bpy.context.scene.collection.objects.link(P['frame__collar'])
+for pl in cme.polygons: pl.use_smooth = True
+print('COLLAR at z', round(ZC, 4), 'faces', len(cme.polygons), flush=True)
+
 # straighten: armrest centres on the x axis, spine behind (+y)
 a7, a8 = C(P['tripo_part_7']), C(P['tripo_part_8']); d = a8 - a7
-yaw = -math.atan2(d[1], d[0]); Rz = mathutils.Matrix.Rotation(yaw, 4, 'Z')
+yaw = -math.atan2(d[1], d[0]) + math.radians(float(os.environ.get('YAW_ADJ', 4))); Rz = mathutils.Matrix.Rotation(yaw, 4, 'Z')
 for o in P.values(): o.data.transform(Rz)
 if C(P['tripo_part_6'])[1] < C(P['tripo_part_5'])[1]:            # spine must be behind the seat
     for o in P.values(): o.data.transform(mathutils.Matrix.Rotation(math.pi, 4, 'Z'))
