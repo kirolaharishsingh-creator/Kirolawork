@@ -73,18 +73,20 @@ wheels = sorted(['tripo_part_11', 'tripo_part_12', 'tripo_part_13', 'tripo_part_
 for i, n in enumerate(wheels): NAMES['wheel_%d' % i] = [n]
 OB = {k: join(v, k) for k, v in NAMES.items()}
 
-# the lumbar loop's lower tip ends in a square-cut stub that pokes out under the loop: cut the tip square to its own
-# direction and cap it flat
-TRIM = os.environ.get('LUMB_TRIM', '0.230,0.412')        # cut point (y, z) on the tip; '' = off
-if TRIM:
-    ty, tz = map(float, TRIM.split(',')); ax = mathutils.Vector((0, 0.61, -0.79)).normalized()   # tip direction (down/back)
-    lb = bmesh.new(); lb.from_mesh(OB['lumbar'].data); lb.faces.ensure_lookup_table()
-    beyond = lambda c: (c.y - ty) * ax.y + (c.z - tz) * ax.z > 0 and c.y > ty - 0.03 and c.z < tz + 0.03
-    cut = [f for f in lb.faces if beyond(f.calc_center_median())]
-    bmesh.ops.delete(lb, geom=cut, context='FACES'); bmesh.ops.delete(lb, geom=[x for x in lb.verts if not x.link_faces], context='VERTS')
-    bd = [e for e in lb.edges if e.is_boundary and all(abs((v.co.y - ty) * ax.y + (v.co.z - tz) * ax.z) < 0.006 and v.co.y > ty - 0.03 for v in e.verts)]
-    if bd: bmesh.ops.holes_fill(lb, edges=bd, sides=0)
-    lb.to_mesh(OB['lumbar'].data); lb.free(); OB['lumbar'].data.update(); print('LUMBAR tip cut faces', len(cut), 'capped edges', len(bd), flush=True)
+# a loose plate under the lumbar loop's lower tip (an extra element, not on the real chair): remove the loose mesh pieces that
+# lie entirely in the box under the tip (LUMB_DROP='y0,z1': y > y0 and z < z1), the loop itself stays untouched
+DROP = os.environ.get('LUMB_DROP', '0.195,0.42')
+if DROP:
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    y0, z1 = map(float, DROP.split(',')); me_ = OB['lumbar'].data
+    vv = np.zeros(len(me_.vertices) * 3); me_.vertices.foreach_get('co', vv); vv = vv.reshape(-1, 3)
+    ee = np.zeros(len(me_.edges) * 2, np.int64); me_.edges.foreach_get('vertices', ee); ee = ee.reshape(-1, 2)
+    nl, lab = connected_components(coo_matrix((np.ones(len(ee)), (ee[:, 0], ee[:, 1])), shape=(len(vv), len(vv))), directed=False)
+    bad = [i for i in range(nl) if (lambda q: q[:, 1].min() > y0 and q[:, 2].max() < z1 and q[:, 2].min() < 0.4)(vv[lab == i])]
+    kill = np.isin(lab, bad); lb = bmesh.new(); lb.from_mesh(me_); lb.verts.ensure_lookup_table()
+    bmesh.ops.delete(lb, geom=[lb.verts[i] for i in np.where(kill)[0]], context='VERTS'); lb.to_mesh(me_); lb.free(); me_.update()
+    print('LUMBAR dropped pieces', bad, 'verts', int(kill.sum()), flush=True)
 
 def stub(name, at):
     m = bpy.data.meshes.new(name); m.from_pydata([at, (at[0] + 1e-4, at[1], at[2]), (at[0], at[1] + 1e-4, at[2])], [], [(0, 1, 2)])
