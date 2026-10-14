@@ -48,3 +48,28 @@ for ow in [int(v) for v in os.environ.get('OUT_W', '1920,3840').split(',')]:
         cv2.imwrite('%s/armside_photo_%s_%d.png' % (out, nm, ow), up)
 cv2.imwrite(out + '/armside_photo_end_native.png', np.clip(E, 0, 255).astype(np.uint8))
 print('done', w, h, 'DX', DX)
+
+# VIDEO=out.mp4: no AI, the slide itself rendered from the cut-out pad (sub-pixel shift, smoothstep easing),
+# loop: hold, out, hold, back, hold (KEYS t:fraction-of-DX), 1080p, light per-frame grain so it doesn't read as a still
+if os.environ.get('VIDEO'):
+    import subprocess
+    FPS = 30; KEYS = [tuple(float(v) for v in k.split(':')) for k in os.environ.get('KEYS', '0:0,0.6:0,1.6:1,2.4:1,3.4:0,4:0').split(',')]
+    def at(t):
+        for (t0, v0), (t1, v1) in zip(KEYS, KEYS[1:]):
+            if t <= t1: u = (t - t0) / max(t1 - t0, 1e-6); u = u * u * (3 - 2 * u); return v0 + (v1 - v0) * u
+        return KEYS[-1][1]
+    ow, oh = 1920, 1080; rng = np.random.default_rng(7)
+    ff = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', '%dx%d' % (ow, oh), '-r', str(FPS), '-i', '-',
+                           '-c:v', 'libx264', '-crf', '14', '-preset', 'slow', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', os.environ['VIDEO']], stdin=subprocess.PIPE)
+    n = int(round(KEYS[-1][0] * FPS))
+    for i in range(n):
+        d = DX * at(i / FPS); Mi = np.float32([[1, 0, d], [0, 1, 0]])
+        ai = cv2.warpAffine(a, Mi, (w, h), flags=cv2.INTER_CUBIC); Fi = cv2.warpAffine(F, Mi, (w, h), flags=cv2.INTER_CUBIC)
+        fr = Fi * ai[..., None] + clean * (1 - ai[..., None]) if d > 0.01 else I.copy()
+        if d > 0.01:
+            band = np.clip(fr[y1 - 8:y1 + 10, x0 - 10:x1 + DX + 6], 0, 255).astype(np.uint8)
+            fr[y1 - 8:y1 + 10, x0 - 10:x1 + DX + 6] = cv2.medianBlur(band, 5)
+        up = cv2.resize(np.clip(fr, 0, 255).astype(np.uint8), (ow, oh), interpolation=cv2.INTER_LANCZOS4).astype(np.float32)
+        up = up + 0.5 * (up - cv2.GaussianBlur(up, (0, 0), 1.2)) + rng.normal(0, 1.0, up.shape)
+        ff.stdin.write(np.clip(up, 0, 255).astype(np.uint8).tobytes())
+    ff.stdin.close(); ff.wait(); print('video', os.environ['VIDEO'], n, 'frames')
