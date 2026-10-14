@@ -3,10 +3,11 @@
 #     ORB + RANSAC homography refined by ECC, so only the pad moves between the frames
 #  2. crop a 16:9 band (y0..y0+H) and extend the backdrop on the right: each row continues with the median of the
 #     photo's right-edge strip (keeps the wall-to-floor gradient), feathered into the photo, light grain
-# Usage: python armrest_side_photo_frames.py start.jpg end.jpg outdir   (env: Y0 520, H 1100, EXCL x0,y0,x1,y1)
+# Usage: python armrest_side_photo_frames.py start.jpg end.jpg outdir   (env: Y0 520, H 1100, EXCL x0,y0,x1,y1, OUT_W 1920|3840)
 import cv2, numpy as np, sys, os
 a_path, b_path, out = sys.argv[1:4]; os.makedirs(out, exist_ok=True)
 Y0, H = int(os.environ.get('Y0', 520)), int(os.environ.get('H', 1100))
+OW = int(os.environ.get('OUT_W', 1920)); OH = OW * 9 // 16     # 3840 = 4K (Lanczos up + light unsharp)
 EX = [int(v) for v in os.environ.get('EXCL', '380,720,820,1700').split(',')]
 A, B = cv2.imread(a_path), cv2.imread(b_path)
 
@@ -34,9 +35,12 @@ def widen(im):
     ext += rng.normal(0, 1.2, ext.shape).astype(np.float32)                 # match photo grain
     a = np.clip((np.arange(w0) - (w0 - 160)) / 150.0, 0, 1)[None, :, None]  # feather the last 150 px into the fill
     ext[:, :w0] = band * (1 - a) + ext[:, :w0] * a
-    return cv2.resize(np.clip(ext, 0, 255).astype(np.uint8), (1920, 1080), interpolation=cv2.INTER_AREA)
+    ext = np.clip(ext, 0, 255).astype(np.uint8)
+    if OW <= W: return cv2.resize(ext, (OW, OH), interpolation=cv2.INTER_AREA)
+    up = cv2.resize(ext, (OW, OH), interpolation=cv2.INTER_LANCZOS4).astype(np.float32)
+    return np.clip(up + 0.6 * (up - cv2.GaussianBlur(up, (0, 0), 1.6)), 0, 255).astype(np.uint8)
 s, e = widen(A), widen(B)
-cv2.imwrite(out + '/armside_start.png', s); cv2.imwrite(out + '/armside_end.png', e)
-d = cv2.absdiff(s, e).max(2); print('static-zone diff (mean, outside arm):', round(float(d[:, :int(380 * 1080 / H)].mean()), 2))
+cv2.imwrite(out + '/armside_start%s.png' % ('' if OW == 1920 else '_%d' % OW), s); cv2.imwrite(out + '/armside_end%s.png' % ('' if OW == 1920 else '_%d' % OW), e)
+d = cv2.absdiff(s, e).max(2); print('static-zone diff (mean, outside arm):', round(float(d[:, :int(380 * OH / H)].mean()), 2))
 sbs = cv2.hconcat([cv2.resize(s, (960, 540)), cv2.resize(e, (960, 540))])
 cv2.imwrite(out + '/armside_pair.jpg', sbs, [cv2.IMWRITE_JPEG_QUALITY, 92])
