@@ -211,6 +211,8 @@ LUMB_TILT = float(os.environ.get('LUMB_TILT', 0))
 LUMB_TILTKEYS = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('LUMB_TILTKEYS', '').split(',') if k]   # 't_s:deg' (needs LUMB_TILT != 0)
 ARM_SIDE = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('ARM_SIDE', '').split(',') if k]
 LUMB_SLIDE = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('LUMB_SLIDE', '').split(',') if k]
+# LUMB_AXIS: slide direction in model coords (e.g. along the pivot arm / its rod, -axis printed by prep_tripo15_recline.py)
+LUMB_AXIS = R.to_3x3() @ mathutils.Vector([float(x) for x in os.environ.get('LUMB_AXIS', '0,-1,0').split(',')]).normalized()
 SEAT_SLIDE = float(os.environ.get('SEAT_SLIDE', 0))      # seat slider travel in metres
 if LUMB_TILT:
     _p = [float(x) for x in os.environ.get('LUMB_PIVOT', '0.016,0.21,0.50').split(',')]
@@ -261,7 +263,7 @@ def pose(f):
     if SEAT_SLIDE:           # USP seat slider: the seat cushion glides forward and back (depth adjustment), one cycle per loop
         objs['seat'].location = (SEAT_SLIDE * 0.5 * (1 - math.cos(2 * math.pi * u)), 0, 0)    # +x is the chair's front after R
     if LUMB_SLIDE:           # USP lumbar depth: the pad slides straight forward / back (keys 't_s:metres forward')
-        objs['lumbar'].location = (keyed(LUMB_SLIDE, f / FPS), 0, 0)                          # +x is the chair's front after R
+        objs['lumbar'].location = keyed(LUMB_SLIDE, f / FPS) * LUMB_AXIS                     # default: straight forward (+x after R)
     if ARM_SIDE:             # USP armrest 4D side slide: both pads slide outward / inward on their posts (metres, + = out)
         d = keyed(ARM_SIDE, f / FPS)
         for side, sgn in (('arm_l', -1), ('arm_r', 1)):      # model x outward = render -y / +y after R
