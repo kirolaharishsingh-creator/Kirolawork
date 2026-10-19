@@ -263,7 +263,13 @@ def pose(f):
     if SEAT_SLIDE:           # USP seat slider: the seat cushion glides forward and back (depth adjustment), one cycle per loop
         objs['seat'].location = (SEAT_SLIDE * 0.5 * (1 - math.cos(2 * math.pi * u)), 0, 0)    # +x is the chair's front after R
     if LUMB_SLIDE:           # USP lumbar depth: the pad slides straight forward / back (keys 't_s:metres forward')
-        objs['lumbar'].location = keyed(LUMB_SLIDE, f / FPS) * LUMB_AXIS                     # default: straight forward (+x after R)
+        d_ = keyed(LUMB_SLIDE, f / FPS); objs['lumbar'].location = d_ * LUMB_AXIS          # default: straight forward (+x after R)
+        rod = FOLLOW.get('frame__lumbrod') if not RIGMODE else None
+        if rod is not None:  # telescoping guide rod: its front ring follows the arm, the rear stays in the spine
+            if 'rest' not in rod: rv = np.zeros(len(rod.data.vertices) * 3); rod.data.vertices.foreach_get('co', rv); rod['rest'] = rv.tolist()
+            rv = np.array(rod['rest']).reshape(-1, 3); ax_ = np.array(LUMB_AXIS); t_ = rv @ ax_
+            rv = rv + np.outer(t_ > (t_.min() + t_.max()) / 2, ax_) * d_
+            rod.data.vertices.foreach_set('co', rv.ravel()); rod.data.update()
     if ARM_SIDE:             # USP armrest 4D side slide: both pads slide outward / inward on their posts (metres, + = out)
         d = keyed(ARM_SIDE, f / FPS)
         for side, sgn in (('arm_l', -1), ('arm_r', 1)):      # model x outward = render -y / +y after R
