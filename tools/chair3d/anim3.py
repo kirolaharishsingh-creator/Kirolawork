@@ -211,6 +211,12 @@ LUMB_TILT = float(os.environ.get('LUMB_TILT', 0))
 LUMB_TILTKEYS = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('LUMB_TILTKEYS', '').split(',') if k]   # 't_s:deg' (needs LUMB_TILT != 0)
 ARM_SIDE = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('ARM_SIDE', '').split(',') if k]
 LUMB_SLIDE = [tuple(float(x) for x in k.split(':')) for k in os.environ.get('LUMB_SLIDE', '').split(',') if k]
+# BACK_FOLLOW: the mesh backrest swings forward from its top as the lumbar slides out (deg at full slide; pivot BACK_PIVOT
+# in model coords), like the real chair where the lumbar pushes the backrest's lower edge
+BACK_FOLLOW = float(os.environ.get('BACK_FOLLOW', 0))
+if BACK_FOLLOW:
+    _b = R @ mathutils.Vector([float(x) for x in os.environ.get('BACK_PIVOT', '0.012,0.226,0.857').split(',')])
+    BACK_P = mathutils.Vector((_b.x - hub[0], _b.y - hub[1], _b.z)); BACK_AX = R.to_3x3() @ mathutils.Vector((1, 0, 0))
 # LUMB_AXIS: slide direction in model coords (e.g. along the pivot arm / its rod, -axis printed by prep_tripo15_recline.py)
 LUMB_AXIS = R.to_3x3() @ mathutils.Vector([float(x) for x in os.environ.get('LUMB_AXIS', '0,-1,0').split(',')]).normalized()
 SEAT_SLIDE = float(os.environ.get('SEAT_SLIDE', 0))      # seat slider travel in metres
@@ -264,6 +270,10 @@ def pose(f):
         objs['seat'].location = (SEAT_SLIDE * 0.5 * (1 - math.cos(2 * math.pi * u)), 0, 0)    # +x is the chair's front after R
     if LUMB_SLIDE:           # USP lumbar depth: the pad slides straight forward / back (keys 't_s:metres forward')
         d_ = keyed(LUMB_SLIDE, f / FPS); objs['lumbar'].location = d_ * LUMB_AXIS          # default: straight forward (+x after R)
+        if BACK_FOLLOW:      # backrest swings with the lumbar (fraction of the largest slide)
+            fr_ = d_ / max(abs(k[1]) for k in LUMB_SLIDE)
+            objs['backrest'].matrix_basis = (mathutils.Matrix.Translation(BACK_P) @ mathutils.Matrix.Rotation(math.radians(BACK_FOLLOW * fr_), 4, BACK_AX)
+                                             @ mathutils.Matrix.Translation(-BACK_P))
         rod = FOLLOW.get('frame__lumbrod') if not RIGMODE else None
         if rod is not None:  # telescoping guide rod: its front ring follows the arm, the rear stays in the spine
             if 'rest' not in rod: rv = np.zeros(len(rod.data.vertices) * 3); rod.data.vertices.foreach_get('co', rv); rod['rest'] = rv.tolist()
