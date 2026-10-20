@@ -16,7 +16,7 @@ ARM_J = np.array([1650, 400.]) * k                                       # arm c
 u = (ARM_B - ARM_A) / np.linalg.norm(ARM_B - ARM_A); S = -u * DIST       # slide: along the arm, away from the spine
 # regions (2000-px coords): lumbar + bracket + backrest bottom; the arm separately
 MOVE = P([(1240, 0), (1612, 0), (1590, 200), (1572, 262), (1566, 365), (1490, 375), (1540, 470), (1600, 540), (1660, 610),
-          (1690, 672), (1696, 694), (1708, 704), (1711, 714), (1707, 726), (1697, 731), (1650, 737),   # tip outline
+          (1690, 672), (1694, 694), (1705, 704), (1708, 714), (1704, 724), (1695, 728), (1650, 735),   # tip outline (inset)
           (1600, 718), (1550, 700), (1500, 670), (1450, 636), (1400, 600), (1356, 570), (1240, 540)])          # lower edge: mid-gap lumbar|seat (measured)
 ARM = P([(1530, 300), (1600, 300), (1700, 400), (1765, 450), (1760, 505), (1700, 505), (1570, 410), (1530, 360)])
 STATIC = P([(1628, 0), (2000, 0), (2000, 800), (1740, 800), (1713, 700), (1703, 693), (1722, 650), (1735, 600), (1700, 520), (1688, 420),
@@ -41,8 +41,14 @@ clean = np.where(grow[..., None] > 0, wall, C)
 # (2000-px); the uncovered part on the spine side of that line is spine black, not wall
 yy0, xx0 = np.mgrid[0:h, 0:w].astype(np.float32); Xg, Yg = (xx0 + x0) / k, (yy0 + y0) / k
 sp = ((Xg - 1666) * 36 + (Yg - 733) * 34 > 0) & (Xg > 1630) & (Xg < 1730) & (Yg > 680) & (Yg < 770)
-spc = np.median(C[(stat > 0) & (L < 60) & (Xg > 1705) & (Xg < 1740) & (Yg > 700) & (Yg < 760)], axis=0)
-clean = np.where(((grow > 0) & sp)[..., None], spc + np.random.default_rng(3).normal(0, 1.2, C.shape), clean)
+# fill it with real spine texture cloned from further along that same edge (down-left, where the piece is visible)
+v = np.array([-37.0, 40.0]) * k
+srcx = np.clip(xx0 + v[0], 0, w - 1).astype(np.float32); srcy = np.clip(yy0 + v[1], 0, h - 1).astype(np.float32)
+clone = cv2.remap(C.astype(np.float32), srcx, srcy, cv2.INTER_LINEAR)
+hole_sp = ((grow > 0) & sp)
+dk = np.median(C[(stat > 0) & (L < 60) & (Xg > 1705) & (Xg < 1740) & (Yg > 700) & (Yg < 760)], axis=0)
+clone = np.where((cv2.cvtColor(np.clip(clone, 0, 255).astype(np.uint8), cv2.COLOR_BGR2GRAY) > 90)[..., None], dk, clone)
+clean = np.where(hole_sp[..., None], clone, clean)          # hard edge: no wall-colour rim against the spine
 # soft alpha + un-mixed colour
 bgL = cv2.cvtColor(clean.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
 fgL = np.percentile(L[movers > 0], 20)
@@ -50,6 +56,10 @@ a = np.clip((bgL - L) / np.maximum(bgL - fgL, 1), 0, 1) * grow
 # only the traced outlines (plus a hair for the anti-aliased edge against the wall) - never neighbouring spine pixels
 a = a * (cv2.dilate(poly(MOVE) | poly(ARM), np.ones((int(3 * k) | 1,) * 2, np.uint8)) & (1 - stat))
 a = np.where(cv2.erode(movers, np.ones((3, 3), np.uint8)) > 0, 1.0, a)
+# lumbar tip: it sat on the black spine, so its edge pixels carry spine black - use a soft edge from the inset outline
+tipb = ((Xg > 1655) & (Xg < 1722) & (Yg > 680) & (Yg < 745)).astype(np.float32)
+soft = cv2.GaussianBlur(cv2.erode(poly(MOVE), np.ones((int(2 * k) | 1,) * 2, np.uint8)).astype(np.float32), (0, 0), 1.5 * k)
+a = a * (1 - tipb) + np.minimum(a, soft) * tipb
 F = (C - (1 - a[..., None]) * clean) / np.maximum(a[..., None], 0.05)
 # displacement weight at OUTPUT positions: 1 on the lumbar, fades to 0 at the top (backrest hinge), linear along the arm
 yy, xx = np.mgrid[0:h, 0:w].astype(np.float32); X, Y = xx + x0, yy + y0
