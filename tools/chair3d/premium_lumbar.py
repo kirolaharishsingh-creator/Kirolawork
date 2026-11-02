@@ -32,6 +32,7 @@ print('pad box', (x, y, w, h), 'full-out shift px', round(dx, 1), round(dy, 1), 
 BG = backdrop(W_, H_, STYLE)
 col = (22, 23, 26)
 def overlay(img, d):
+    if os.environ.get('NOTEXT') == '1': return img                                      # colour setting only
     im = Image.fromarray(img).convert('RGBA'); lay = Image.new('RGBA', im.size, (0, 0, 0, 0)); dr = ImageDraw.Draw(lay)
     k = d / DMAX; px, py = ax0 + dx * k, ay0 + dy * k
     tx, ty = int(W_ * 0.06), int(H_ * 0.09)                                    # top-left, clear of the chair

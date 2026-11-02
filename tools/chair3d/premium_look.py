@@ -24,12 +24,13 @@ def backdrop(w, h, style):
         floor = np.clip((Y - 0.80) / 0.20, 0, 1)[..., None]; bg = bg * (1 - 0.25 * floor)
     return np.clip(bg + np.random.default_rng(5).normal(0, 0.8, bg.shape), 0, 255)
 
-def grade_chair(rgb):
+def grade_chair(rgb, k=1.0):
+    # k: strength (1 = 3D renders; ~0.4 for compressed photo / Kling clips, where full clarity shows the codec noise)
     x = rgb.astype(np.float32) / 255
-    x = x + 0.45 * (x - cv2.GaussianBlur(x, (0, 0), 14))                                 # clarity
-    x = x + 0.35 * (x - cv2.GaussianBlur(x, (0, 0), 1.2))                                # fine detail
+    x = x + 0.45 * k * (x - cv2.GaussianBlur(x, (0, 0), 14))                             # clarity
+    x = x + 0.35 * k * (x - cv2.GaussianBlur(x, (0, 0), 1.2))                            # fine detail
     x = np.clip(x, 0, 1)
-    x = 0.5 + (x - 0.5) * 1.12; x = np.clip(x, 0, 1) ** 1.12                             # contrast, deeper blacks
+    x = 0.5 + (x - 0.5) * (1 + 0.12 * k); x = np.clip(x, 0, 1) ** (1 + 0.12 * k)         # contrast, deeper blacks
     lum = x.mean(2, keepdims=True); hi = np.clip((lum - 0.45) / 0.4, 0, 1)
     x = x + hi * (1 - x) * 0.35                                                           # chrome / speculars pop
     x = x * np.array([0.985, 1.0, 1.03])                                                  # cool neutral
