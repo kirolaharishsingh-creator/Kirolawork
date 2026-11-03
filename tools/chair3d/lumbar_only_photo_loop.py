@@ -46,13 +46,15 @@ clean = np.where(hole[..., None] > 0, wall, C)
 yy0, xx0 = np.mgrid[0:h, 0:w].astype(np.float32); Xg, Yg = (xx0 + x0) / k, (yy0 + y0) / k
 sp = ((Xg - 1666) * 36 + (Yg - 733) * 34 > 0) & (Xg > 1630) & (Xg < 1730) & (Yg > 680) & (Yg < 770)
 # fill it with real spine texture cloned from further along that same edge (down-left, where the piece is visible)
-v = np.array([float(q) for q in os.environ.get('SPINE_CLONE', '14,0').split(',')]) * k   # spine texture just right of the hole (same piece)
+v = np.array([float(q) for q in os.environ.get('SPINE_CLONE', '41,-44').split(',')]) * k   # spine texture from further up-right ALONG its edge (edge + groove continue, no slots)
 srcx = np.clip(xx0 + v[0], 0, w - 1).astype(np.float32); srcy = np.clip(yy0 + v[1], 0, h - 1).astype(np.float32)
 clone = cv2.remap(C.astype(np.float32), srcx, srcy, cv2.INTER_LINEAR)
 hole_sp = ((grow > 0) & sp)
 dk = np.median(C[(stat > 0) & (L < 60) & (Xg > 1705) & (Xg < 1740) & (Yg > 700) & (Yg < 760)], axis=0)
 clone = np.where((cv2.cvtColor(np.clip(clone, 0, 255).astype(np.uint8), cv2.COLOR_BGR2GRAY) > 90)[..., None], dk, clone)
-clean = np.where(hole_sp[..., None], clone, clean)          # hard edge: no wall-colour rim against the spine
+dsp = ((Xg - 1666) * 36 + (Yg - 733) * 34) / 49.5 * k                       # signed distance to the edge, full-res px
+wsp = (np.clip(dsp / 2.5 + 0.5, 0, 1) * (grow > 0) * (Xg > 1630) * (Xg < 1730) * (Yg > 680) * (Yg < 770)).astype(np.float32)
+clean = clone * wsp[..., None] + clean * (1 - wsp[..., None])              # soft photographic edge against the wall
 # the lumbar's top runs on under the backrest's lower edge: where its top edge pulls away from that edge while it slides,
 # show more lumbar top face (cloned from just inside it), not wall
 TOPL = np.array([(1413, 147), (1455, 148), (1475, 147), (1495, 151), (1515, 158), (1535, 168), (1555, 179), (1565, 185)], np.float32)   # under the backrest's dark seam (measured)
@@ -71,7 +73,7 @@ a = a * (cv2.dilate(poly(MOVE) | poly(ARM), np.ones((int(3 * k) | 1,) * 2, np.ui
 a = np.where(cv2.erode(movers, np.ones((3, 3), np.uint8)) > 0, 1.0, a)
 # lumbar tip: it sat on the black spine, so its edge pixels carry spine black - use a soft edge from the inset outline
 tipb = ((Xg > 1655) & (Xg < 1722) & (Yg > 680) & (Yg < 745)).astype(np.float32)
-soft = cv2.GaussianBlur(cv2.erode(poly(MOVE), np.ones((int(2 * k) | 1,) * 2, np.uint8)).astype(np.float32), (0, 0), 1.5 * k)
+soft = cv2.GaussianBlur(cv2.erode(poly(MOVE), np.ones((int(2 * k) | 1,) * 2, np.uint8)).astype(np.float32), (0, 0), 0.6 * k)
 a = a * (1 - tipb) + np.minimum(a, soft) * tipb
 F = (C - (1 - a[..., None]) * clean) / np.maximum(a[..., None], 0.05)
 F = np.where(a[..., None] < 0.05, C, np.clip(F, 0, 255))      # no blow-up where there is no foreground (cubic warp rings)
