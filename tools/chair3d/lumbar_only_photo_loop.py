@@ -46,12 +46,22 @@ clean = np.where(hole[..., None] > 0, wall, C)
 yy0, xx0 = np.mgrid[0:h, 0:w].astype(np.float32); Xg, Yg = (xx0 + x0) / k, (yy0 + y0) / k
 sp = ((Xg - 1666) * 36 + (Yg - 733) * 34 > 0) & (Xg > 1630) & (Xg < 1730) & (Yg > 680) & (Yg < 770)
 # fill it with real spine texture cloned from further along that same edge (down-left, where the piece is visible)
-v = np.array([float(q) for q in os.environ.get('SPINE_CLONE', '41,-44').split(',')]) * k   # spine texture from further up-right ALONG its edge (edge + groove continue, no slots)
+v = np.array([float(q) for q in os.environ.get('SPINE_CLONE', '-37,40').split(',')]) * k   # one slot pitch down-left along the edge: its grey rim continues
 srcx = np.clip(xx0 + v[0], 0, w - 1).astype(np.float32); srcy = np.clip(yy0 + v[1], 0, h - 1).astype(np.float32)
 clone = cv2.remap(C.astype(np.float32), srcx, srcy, cv2.INTER_LINEAR)
 hole_sp = ((grow > 0) & sp)
 dk = np.median(C[(stat > 0) & (L < 60) & (Xg > 1705) & (Xg < 1740) & (Yg > 700) & (Yg < 760)], axis=0)
 clone = np.where((cv2.cvtColor(np.clip(clone, 0, 255).astype(np.uint8), cv2.COLOR_BGR2GRAY) > 90)[..., None], dk, clone)
+if True:
+    # the spine piece behind the tip has a dark rim and a lighter bar that run at different angles: let them grow in from
+    # the visible spine around the hole (wall side of the edge set to spine black first, so no wall colour bleeds in)
+    base = np.where((~sp)[..., None], dk, C).astype(np.uint8)
+    hm = (hole_sp | (cv2.dilate(hole_sp.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & sp).astype(np.uint8) * 255
+    inp = cv2.inpaint(base, hm, int(6 * k), cv2.INPAINT_TELEA).astype(np.float32)
+    # grey rim along the edge from the clone, the slot interior (deeper than ~5 px) from the inpaint: no half slot-bars
+    d2 = ((Xg - 1666) * 36 + (Yg - 733) * 34) / 49.5
+    wmix = np.clip((d2 - 5) / 3, 0, 1)[..., None]
+    clone = clone * (1 - wmix) + inp * wmix
 dsp = ((Xg - 1666) * 36 + (Yg - 733) * 34) / 49.5 * k                       # signed distance to the edge, full-res px
 wsp = (np.clip(dsp / 2.5 + 0.5, 0, 1) * (grow > 0) * (Xg > 1630) * (Xg < 1730) * (Yg > 680) * (Yg < 770)).astype(np.float32)
 clean = clone * wsp[..., None] + clean * (1 - wsp[..., None])              # soft photographic edge against the wall
@@ -134,7 +144,7 @@ outs = [('full_1080p', (1920, 1080), lambda f: f[oy:oy + oh]), ('full_4k', (3840
 pr = [] if os.environ.get('STILL') else [(nm, sz, cr, enc('%s/lumbar_only_photo_%s.mp4' % (out, nm), sz)) for nm, sz, cr in outs]
 n = int(round(KEYS[-1][0] * FPS))
 if os.environ.get('STILL'):
-    f = frame(1.0); cv2.imwrite(out + '/end_closeup.png', f[Z[1]:Z[3], Z[0]:Z[2]]); sys.exit()
+    f = frame(1.0); cv2.imwrite(out + '/end_closeup.png', f[Z[1]:Z[3], Z[0]:Z[2]]); cv2.imwrite(out + '/end_full.jpg', f, [cv2.IMWRITE_JPEG_QUALITY, 95]); sys.exit()
 for i in range(n):
     p = at(i / FPS); f = frame(p)
     for nm, sz, cr, pp in pr: pp.stdin.write(cv2.resize(cr(f), sz, interpolation=cv2.INTER_AREA).tobytes())
