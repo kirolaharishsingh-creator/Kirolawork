@@ -75,7 +75,18 @@ soft = cv2.GaussianBlur(cv2.erode(poly(MOVE), np.ones((int(2 * k) | 1,) * 2, np.
 a = a * (1 - tipb) + np.minimum(a, soft) * tipb
 F = (C - (1 - a[..., None]) * clean) / np.maximum(a[..., None], 0.05)
 F = np.where(a[..., None] < 0.05, C, np.clip(F, 0, 255))      # no blow-up where there is no foreground (cubic warp rings)
-F = np.where(a[..., None] < 0.9, np.minimum(F, np.median(C[movers > 0], axis=0) * 1.6), F)   # edge pixels: never lighter than the pad (no white fringe)
+# edge pixels (partly wall in the photo) take the colour of the pad just inside them: no light halo, no white fringe
+inner = (a > 0.95).astype(np.float32)
+Fin = cv2.GaussianBlur(F * inner[..., None], (0, 0), 2 * k) / np.maximum(cv2.GaussianBlur(inner, (0, 0), 2 * k), 1e-3)[..., None]
+F = np.where((a < 0.95)[..., None] & (cv2.GaussianBlur(inner, (0, 0), 2 * k) > 0.02)[..., None], Fin, F)
+# the pad's top just right of the notch was hidden under the backrest's seam (mixed shadow pixels): when it slides out it
+# gets the pad's own face (cloned from just below) and a clean, slightly soft top edge instead of the seam's dashes
+HT = 147.0 - 0.22 * np.clip(Xg - 1413, 0, 40)                # hidden top: continues the visible edge's gentle rise
+rim = (Xg >= 1405) & (Xg <= 1455) & (Yg >= HT) & (Yg <= line + 5) & (yb >= 120)
+rw = (rim * np.clip((Xg - 1405) / 10, 0, 1)).astype(np.float32)              # fades in from the visible edge (no step)
+F = F * (1 - rw[..., None]) + face * rw[..., None]; a = np.maximum(a, rw)
+soft_r = (Xg >= 1400) & (Xg <= 1460) & (Yg >= 136) & (Yg <= 160)
+a = np.where(soft_r, cv2.GaussianBlur(a.astype(np.float32), (0, 0), 0.8 * k), a)
 # displacement weight at OUTPUT positions: 1 on the lumbar, fades to 0 at the top (backrest hinge), linear along the arm
 yy, xx = np.mgrid[0:h, 0:w].astype(np.float32); X, Y = xx + x0, yy + y0
 wgt = np.ones_like(Y)                                              # the whole lumbar moves rigidly
@@ -100,6 +111,7 @@ bkd = cv2.dilate(bk, np.ones((int(3 * k) | 1,) * 2, np.uint8)) & (1 - movers)
 aB = np.clip((bgL - L) / np.maximum(bgL - fgL, 1), 0, 1) * bkd; aB = np.where(bk > 0, 1.0, aB).astype(np.float32)[..., None]
 bcol = np.median(C[(bk > 0) & (L < 60)], axis=0)                       # its edge pixels get the backrest's own colour (no wall fringe)
 FB = np.where(bk[..., None] > 0, C, bcol).astype(np.float32)
+nz = ((xb >= 1395) & (xb <= 1460) & (yb >= 125) & (yb <= 160))[..., None]   # notch: smooth the backrest's edge over the pad
 def frame(p):
     if p < 1e-4: return np.clip(I, 0, 255).astype(np.uint8)
     mx, my = (xx - S[0] * p * wgt).astype(np.float32), (yy - S[1] * p * wgt * vf).astype(np.float32)
