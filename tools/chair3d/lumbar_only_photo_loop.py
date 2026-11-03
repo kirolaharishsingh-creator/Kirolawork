@@ -11,9 +11,9 @@ P = lambda pts: (np.array(pts, np.float32) * k).astype(np.int32)
 DIST = float(os.environ.get('DIST', 20)) * k
 ARM_A, ARM_B = np.array([1500, 318.]) * k, np.array([1748, 465.]) * k    # bracket bolt -> spine bolt
 ARM_J = np.array([1650, 400.]) * k                                       # arm crosses the rear frame bar: static from here
-u = (ARM_B - ARM_A) / np.linalg.norm(ARM_B - ARM_A); S = np.array([-DIST, 0.0])   # slide: level, towards the chair front
+u = (ARM_B - ARM_A) / np.linalg.norm(ARM_B - ARM_A); S = np.array([-DIST, -DIST * float(os.environ.get('SLOPE', 0.4))])   # towards the chair front, along the pad's own top edge (stays tucked under the backrest)
 # regions (2000-px coords): lumbar + bracket + backrest bottom; the arm separately
-MOVE = P([(1240, 150), (1413, 147), (1435, 148), (1455, 148), (1475, 147), (1495, 151), (1515, 158), (1535, 168), (1555, 179), (1565, 185),
+MOVE = P([(1240, 140), (1380, 138), (1406, 141), (1413, 147), (1435, 148), (1455, 148), (1475, 147), (1495, 151), (1515, 158), (1535, 168), (1555, 179), (1565, 185),
           (1580, 190), (1580, 262), (1566, 365), (1490, 375), (1540, 470), (1600, 540), (1660, 610),
           (1690, 672), (1694, 694), (1705, 704), (1708, 714), (1704, 724), (1695, 728), (1650, 735),   # tip outline (inset)
           (1600, 718), (1550, 700), (1500, 670), (1450, 636), (1400, 600), (1356, 570), (1240, 540)])          # lower edge: mid-gap lumbar|seat (measured)
@@ -57,11 +57,11 @@ clean = np.where(hole_sp[..., None], clone, clean)          # hard edge: no wall
 # show more lumbar top face (cloned from just inside it), not wall
 TOPL = np.array([(1413, 147), (1455, 148), (1475, 147), (1495, 151), (1515, 158), (1535, 168), (1555, 179), (1565, 185)], np.float32)   # under the backrest's dark seam (measured)
 line = np.interp(Xg, TOPL[:, 0], TOPL[:, 1])
-band = ((Xg >= 1405) & (Yg >= line - 1) & (Yg <= line + 14) & (grow > 0)).astype(np.float32)
-band = band * np.clip((1572 - DIST / k - Xg) / 1.5 + 0.5, 0, 1)        # ends at the slid lumbar's right edge (1572 at rest), feathered
+band = ((Xg >= 1418) & (Yg >= line - 5) & (Yg <= line + 14) & (grow > 0)).astype(np.float32)
+band = band * np.clip((1566 - DIST / k - Xg) / 2.0 + 0.5, 0, 1)        # ends at the slid lumbar's right edge (1572 at rest), feathered
 srcy2 = np.clip(yy0 + 18 * k, 0, h - 1).astype(np.float32)
 face = cv2.remap(C.astype(np.float32), xx0.astype(np.float32), srcy2, cv2.INTER_LINEAR)
-clean = face * band[..., None] + clean * (1 - band[..., None])
+if os.environ.get('BAND', '1') == '1': clean = face * band[..., None] + clean * (1 - band[..., None])
 # soft alpha + un-mixed colour
 bgL = cv2.cvtColor(clean.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
 fgL = np.percentile(L[movers > 0], 20)
@@ -75,6 +75,7 @@ soft = cv2.GaussianBlur(cv2.erode(poly(MOVE), np.ones((int(2 * k) | 1,) * 2, np.
 a = a * (1 - tipb) + np.minimum(a, soft) * tipb
 F = (C - (1 - a[..., None]) * clean) / np.maximum(a[..., None], 0.05)
 F = np.where(a[..., None] < 0.05, C, np.clip(F, 0, 255))      # no blow-up where there is no foreground (cubic warp rings)
+F = np.where(a[..., None] < 0.9, np.minimum(F, np.median(C[movers > 0], axis=0) * 1.6), F)   # edge pixels: never lighter than the pad (no white fringe)
 # displacement weight at OUTPUT positions: 1 on the lumbar, fades to 0 at the top (backrest hinge), linear along the arm
 yy, xx = np.mgrid[0:h, 0:w].astype(np.float32); X, Y = xx + x0, yy + y0
 wgt = np.ones_like(Y)                                              # the whole lumbar moves rigidly
@@ -91,13 +92,22 @@ def at(t):
         if t <= t1: q = min(max((t - t0) / max(t1 - t0, 1e-6), 0), 1); return v0 + (v1 - v0) * q * q * (3 - 2 * q)
     return KEYS[-1][1]
 Fa = F.astype(np.float32); aa = a.astype(np.float32)
+# the small lift only where the pad's top edge slopes down under the backrest (right part); the front (left) part slides level
+vf = np.clip((X / k - 1440) / 60, 0, 1); vf = (vf * vf * (3 - 2 * vf)).astype(np.float32)
+# backrest lower edge = a static layer drawn OVER the sliding pad (the pad tucks under it, its outline never changes)
+bk = (dark & (1 - movers) & (yb < 200) & (xb > 1370) & (xb < 1600)).astype(np.uint8)
+bkd = cv2.dilate(bk, np.ones((int(3 * k) | 1,) * 2, np.uint8)) & (1 - movers)
+aB = np.clip((bgL - L) / np.maximum(bgL - fgL, 1), 0, 1) * bkd; aB = np.where(bk > 0, 1.0, aB).astype(np.float32)[..., None]
+bcol = np.median(C[(bk > 0) & (L < 60)], axis=0)                       # its edge pixels get the backrest's own colour (no wall fringe)
+FB = np.where(bk[..., None] > 0, C, bcol).astype(np.float32)
 def frame(p):
     if p < 1e-4: return np.clip(I, 0, 255).astype(np.uint8)
-    mx, my = (xx - S[0] * p * wgt).astype(np.float32), (yy - S[1] * p * wgt).astype(np.float32)
+    mx, my = (xx - S[0] * p * wgt).astype(np.float32), (yy - S[1] * p * wgt * vf).astype(np.float32)
     a2 = np.clip(cv2.remap(aa, mx, my, cv2.INTER_CUBIC, borderValue=0), 0, 1)[..., None]
     F2 = cv2.remap(Fa, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    m = np.clip(np.abs(S[0]) * p * wgt / 1.5, 0, 1)[..., None]     # where nothing moves (< 1.5 px) keep the photo exactly
-    E = I.copy(); E[y0:y1, x0:x1] = (F2 * a2 + clean * (1 - a2)) * m + C * (1 - m)
+    m = np.clip(np.hypot(*S) * p * wgt / 1.5, 0, 1)[..., None]     # where nothing moves (< 1.5 px) keep the photo exactly
+    comp = F2 * a2 + clean * (1 - a2); comp = FB * aB + comp * (1 - aB)
+    E = I.copy(); E[y0:y1, x0:x1] = comp * m + C * (1 - m)
     return np.clip(E, 0, 255).astype(np.uint8)
 zx0, zy0, zx1 = [float(v) for v in os.environ.get('ZOOM', '880,110,2000').split(',')]
 Z = [int(zx0 * k), int(zy0 * k), int(zx1 * k), int(zy0 * k + (zx1 - zx0) * k * 9 / 16)]
